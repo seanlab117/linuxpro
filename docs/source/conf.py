@@ -175,7 +175,7 @@ html_static_path = [u'_static']
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'pythobasedoc'
+htmlhelp_basename = 'linuxbasedoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -190,7 +190,7 @@ latex_font_size = u'10pt'
 
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
-latex_documents = [('index', 'pythobase.tex', u'pythobase Documentation', u'sean', 'manual')]
+latex_documents = [('index', 'linuxbase.tex', u'linuxbase Documentation', u'sean', 'manual')]
 
 
 # A dictionary that contains LaTeX snippets that override those Sphinx usually 
@@ -227,7 +227,7 @@ latex_use_parts = False
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [('index', 'pythobase', u'pythobase Documentation', [u'sean'], 1)]
+man_pages = [('index', 'linuxbase', u'linuxbase Documentation', [u'sean'], 1)]
 
 
 # -- Additional options --------------------------------------------------------
