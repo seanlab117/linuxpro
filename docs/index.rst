@@ -20,7 +20,9 @@ Welcome to sean's Guide to Linux Kernel Architecture
 
 If you'd like to help,  `fork us on GitHub <https://github.com/newsteinking/linuxpro>`_!
 
-contacts: newstein33@gmail.com .
+contacts: newstein33@gmail.com 
+
+
 
 
 .. include:: contents.rst.inc
