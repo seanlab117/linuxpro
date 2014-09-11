@@ -17,7 +17,7 @@ Chapter 1:Introduction and Overview
  기본적 관계를 다르게 될것이다.
 
 
-.. _default_args:
+
 
 Task of the Kernel
 ------------------
