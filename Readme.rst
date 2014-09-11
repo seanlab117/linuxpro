@@ -1,33 +1,18 @@
-Hitchhiker's Guide to Python
-============================
+Professional
+=================================
+Linux Kernel Architecture
+=================================
 
-**Python Best Practices Guidebook**
+Welcome to sean's Guide to Linux Kernel Architecture
 
------------
+리눅스 커널의 구조에 입문하신것을 환영합니다.
 
-**Work in progress. If you'd like to help, please do. There's a lot of work to
-be done.**
-
-This guide is currently under heavy development. This opinionated guide
-exists to provide both novice and expert Python developers a best-practice
-handbook to the installation, configuration, and usage of Python on a daily
-basis.
+본 번역서는 Wolfgang Mauerer 저서의 **<Professional Linux Architecture>** 를 근간으로
+하고 있습니다.
 
 
-Topics include:
+**현재 번역중이며... 언제라도 잘못된 부분이 있으면 알려주세요.**
 
-- Platform- and version-specific installations
-- Py2app, Py2exe, bbfreeze, pyInstaller
-- Pip
-- Virtualenv
-- fabric
-- Exhaustive module recommendations, grouped by topic/purpose
-- Which libraries to use for what
-- Server configurations & tools for various web frameworks
-- Documentation: writing it
-- Testing: Jenkins & tox guides
-- How to easily interface ``hg`` from ``git``
+If you'd like to help,  `fork us on GitHub <https://github.com/newsteinking/linuxpro>`_!
 
-If you aren't fond of reading reStructuredText, there is an
-almost up-to-date `HTML version at docs.python-guide.org
-<http://docs.python-guide.org>`_.
+contacts: newstein33@gmail.com
