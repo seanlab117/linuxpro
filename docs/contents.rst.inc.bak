@@ -1,7 +1,7 @@
 Professional Linux Kernel Architecture
 ---------------
 
- 본 문서는 리눅스 커널의 구조에 대해서 서술한다.
+This part of the guide focuses on best practices for writing Python code.
 
 .. toctree::
    :maxdepth: 2
