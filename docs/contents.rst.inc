@@ -6,6 +6,7 @@ Professional Linux Kernel Architecture
 .. toctree::
    :maxdepth: 2
 
+   linuxpro/chapter0
    linuxpro/chapter1
    linuxpro/chapter2
    linuxpro/chapter3
