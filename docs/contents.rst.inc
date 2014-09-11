@@ -39,12 +39,12 @@ Professional Linux Kernel Architecture
 
 --------------------------------------
 
-Contribution notes and legal information are here (for those interested).
+ 라이센스 정보는 아래와 같다. 또한 스타일 가이드도 첨부한다.
 
 .. toctree::
    :maxdepth: 2
 
-   notes/contribute
+   notes/donate
    notes/license
    notes/styleguide
 
