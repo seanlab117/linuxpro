@@ -23,6 +23,4 @@ If you'd like to help,  `fork us on GitHub <https://github.com/newsteinking/linu
 contacts: newstein33@gmail.com 
 
 
-
-
 .. include:: contents.rst.inc
