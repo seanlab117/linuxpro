@@ -220,8 +220,8 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'pythonguide', u'Python Guide Documentation',
-     [u'Kenneth Reitz'], 1)
+    ('index', 'linuxguide', u'Linux Kernel Guide Documentation',
+     [u'sean'], 1)
 ]
 
 
