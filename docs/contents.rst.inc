@@ -30,18 +30,6 @@ Professional Linux Kernel Architecture
    
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 Getting Started
 ---------------
 
