@@ -46,7 +46,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'pythonguide'
-copyright = u'2014. A <a href="http://kennethreitz.com/pages/open-projects.html">Kenneth Reitz</a> Project. <a href="http://creativecommons.org/licenses/by-nc-sa/3.0/"> Creative Commons Share-Alike 3.0</a>'
+copyright = u'2014. A <a href="http://linuxpro.readthedocs.org/en/latest/">sean's linux </a> Project. <a href="http://creativecommons.org/licenses/by-nc-sa/3.0/"> Creative Commons Share-Alike 3.0</a>'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -108,7 +108,7 @@ html_theme_path = ['_themes']
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
-html_title = 'The Hitchhiker\'s Guide to Python'
+html_title = 'The SEAN\'s Guide to Linux Kernel'
 
 # A shorter title for the navigation bar.  Default is the same as html_title.
 #html_short_title = None
@@ -173,7 +173,7 @@ html_show_sphinx = False
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'pythonguidedoc'
+htmlhelp_basename = 'linuxguidedoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -187,8 +187,8 @@ htmlhelp_basename = 'pythonguidedoc'
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'pythonguide.tex', u'Python Guide Documentation',
-   u'Kenneth Reitz', 'manual'),
+  ('index', 'linuxguide.tex', u'Linux Guide Documentation',
+   u'sean', 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -228,10 +228,10 @@ man_pages = [
 # -- Options for Epub output ---------------------------------------------------
 
 # Bibliographic Dublin Core info.
-epub_title = u'pythonguide'
-epub_author = u'Kenneth Reitz'
-epub_publisher = u'Kenneth Reitz'
-epub_copyright = u'2014, Kenneth Reitz'
+epub_title = u'linuxguide'
+epub_author = u'sean'
+epub_publisher = u'sean'
+epub_copyright = u'2014, sean'
 
 # The language of the text. It defaults to the language option
 # or en if the language is not set.
