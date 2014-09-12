@@ -44,7 +44,7 @@ master_doc = u'index'
 
 
 # General information about the project.
-project = u'pythobase'
+project = u'linuxbase'
 
 copyright = u'2014, sean'
 
