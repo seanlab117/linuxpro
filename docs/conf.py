@@ -48,7 +48,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'linuxguide'
-copyright = u'2014. A <a href="http://linuxpro.readthedocs.org/en/latest/"> sean linux </a> Project <a href="http://creativecommons.org/licenses/by-nc-sa/3.0/"> Creative Commons Share-Alike 3.0</a>'
+copyright = u'2014. A <a href="http://linuxpro.readthedocs.org/en/latest/"> SEAN Linux </a> Project <a href="http://creativecommons.org/licenses/by-nc-sa/3.0/">Linux GNU & Creative Commons Share-Alike 3.0 </a>'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -189,7 +189,7 @@ htmlhelp_basename = 'linuxguidedoc'
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'linuxguide.tex', u'Linux Guide Documentation',
+  ('index', 'linuxguide.tex', u'Linux Kernel Guide Documentation',
    u'sean', 'manual'),
 ]
 
