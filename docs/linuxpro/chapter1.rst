@@ -157,5 +157,5 @@ Chapter 1:Introduction and Overview
 
     $ pstree
 
- .. image::/images/Fig1-1_00000.png
+ .. image:: ./images/Fig1-1_00000.png
 
