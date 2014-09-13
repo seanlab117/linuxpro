@@ -11,7 +11,7 @@ Thanks to
 ------------------
 
 - Wolfgang Mauerer
-- 주성식 과장님
+- Mr Ju SS
 - OSS Members
 
 
