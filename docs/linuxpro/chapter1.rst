@@ -158,8 +158,9 @@ Chapter 1:Introduction and Overview
     $ pstree
 
 
+   아래 트리 구조로 보여진다.
 
- .. image:: ./images/Fig1-1_00000.png
+ 
 
  .. image:: ./images/Fig1-1_00000.jpg
 
