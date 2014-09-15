@@ -157,7 +157,11 @@ Chapter 1:Introduction and Overview
 
     $ pstree
 
+
+
  .. image:: ./images/Fig1-1_00000.png
+
+ .. image:: ./images/Fig1-1_00000.jpg
 
 
   어떻게 이런 트리가 확장해가느냐는 새로운 프로세스가 어떻게 생성되어가느냐에 아주 밀접하게 연관이 있다.
