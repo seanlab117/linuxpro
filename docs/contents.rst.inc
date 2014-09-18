@@ -4,7 +4,7 @@ Professional Linux Kernel Architecture
  본 문서는 리눅스 커널의 구조에 대해서 서술한다.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
 
    linuxpro/chapter0
    linuxpro/chapter1
