@@ -1,24 +1,142 @@
-Chapter 2:Introduction and Overview
-===================================
+
+###############################################
+Chapter 2 : Process Management and Scheduling
+################################################
+
+
+
+2.1 Process Priorities
+==============================
 
 
 
 
+2.2 Process Life Cycle
+==============================
 
-
-Task of the Kernel
-------------------
-
-.. 본문 
-
-
-Implementation Strategies
+Preemptive Multitasking
 -------------------------
 
-.. 본문 
+
+2.3 Process Representation
+==============================
+
+Process Types
+-------------------------
 
 
-Elements of the Kernel
+Namespaces
+-------------------------
+
+
+Process Identification Numbers
+-------------------------------
+
+Task Relationships
+-------------------------------
+
+
+
+ProcessManagement System Calls
+=================================
+Process Duplication
+-----------------------
+
+
+Kernel Threads
+------------------------
+
+
+Starting New Programs
+-------------------------
+
+
+Exiting Processes
+-------------------------
+
+
+Implementation of the Scheduler
+==================================
+
+Overview
+---------------
+
+
+Data Structures
+------------------
+
+Dealing with Priorities
+----------------------------
+
+
+Core Scheduler
+---------------------
+
+
+
+The Completely Fair Scheduling Class
+========================================
+
+Data Structures
+-----------------
+
+
+CFS Operations
+-------------------
+
+
+Queue Manipulation
+-----------------------
+
+
+Selecting the Next Task
+-------------------------
+
+
+Handling the Periodic Tick
+-------------------------------
+
+
+Wake-up Preemption
+---------------------
+
+
+Handling New Tasks
 ----------------------
 
-.. 본문 
+
+
+The Real-Time Scheduling Class
+===============================
+
+
+Properties
+--------------
+
+
+Data Structures
+--------------------
+
+
+Scheduler Operations
+------------------------
+
+
+Scheduler Enhancements
+===============================
+
+SMP Scheduling
+----------------
+
+
+Scheduling Domains and Control Groups
+-------------------------------------
+
+
+Kernel Preemption and Low Latency Efforts
+--------------------------------------------
+
+
+
+Summary
+===========
