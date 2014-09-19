@@ -1,23 +1,82 @@
-Chapter 7:Introduction and Overview
-===================================
+
+Chapter 7 : Modules
+####################################################
 
 
 
+7.1 Overview
+====================================
 
 
-Task of the Kernel
-------------------
-
-.. 본문 
+7.2 Using Modules
+====================================
 
 
-Implementation Strategies
--------------------------
-
-.. 본문 
+Adding and Removing
+------------------------------------
 
 
-Elements of the Kernel
-----------------------
+Dependencies
+------------------------------------
 
-.. 본문 
+Querying Module Information
+------------------------------------
+
+
+Automatic Loading
+------------------------------------
+
+
+7.3 Inserting and Deleting Modules
+====================================
+
+
+Module Representation
+------------------------------------
+
+
+Dependencies and References
+------------------------------------
+
+
+
+Binary Structure of Modules
+------------------------------------
+
+
+Inserting Modules
+------------------------------------
+
+
+Removing Modules
+------------------------------------
+
+
+7.4 Automation and Hotplugging
+====================================
+
+
+Automatic Loading with kmod
+------------------------------------
+
+
+Hotplugging
+------------------------------------
+
+
+7.5 Version Control
+====================================
+
+
+Checksum Methods
+------------------------------------
+
+
+Version Control Functions
+------------------------------------
+
+
+Summary
+===================
+
+

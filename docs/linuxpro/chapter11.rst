@@ -1,24 +1,41 @@
-Chapter 11:Introduction and Overview
-====================================
+Chapter 11 : Extended Attributes and Access Control Lists
+###########################################################
 
 
 
 
+11.1 Extended Attributes
+===========================================
 
 
-Task of the Kernel
-------------------
-
-.. 본문 
+Interface to the Virtual Filesystem
+--------------------------------------
 
 
-Implementation Strategies
--------------------------
-
-.. 본문 
+Implementation in Ext3
+--------------------------------------
 
 
-Elements of the Kernel
-----------------------
+Implementation in Ext2
+--------------------------------------
 
-.. 본문 
+
+11.2 Access Control Lists
+===========================================
+
+
+Generic Implementation
+--------------------------------------
+
+
+Implementation in Ext3
+--------------------------------------
+
+
+Implementation in Ext2
+--------------------------------------
+
+
+Summary
+===========================================
+

@@ -1,24 +1,105 @@
-Chapter 5:Introduction and Overview
-===================================
+
+Chapter 5 : Locking and Interprocess Communication
+####################################################
+
+
+
+5.1 Control Mechanisms
+==============================
+
+
+Race Conditions
+---------------------------------
+
+
+Critical Sections
+---------------------------------
+
+
+5.2 Kernel LockingMechanisms
+============================
+
+
+
+Atomic Operations on Integers
+---------------------------------
+
+
+
+Spinlocks
+---------------------------------
+
+
+Semaphores
+---------------------------------
+
+
+The Read-Copy-Update Mechanism
+---------------------------------
+
+
+
+Memory and Optimization Barriers
+---------------------------------
+
+
+Reader/Writer Locks
+---------------------------------
+
+
+The Big Kernel Lock
+---------------------------------
+
+
+Mutexes
+---------------------------------
+
+
+Approximate Per-CPU Counters
+---------------------------------
+
+
+Lock Contention and Fine-Grained Locking
+-----------------------------------------------
+
+
+5.3 System V Interprocess Communication
+=========================================
 
 
 
 
 
-
-Task of the Kernel
-------------------
-
-.. 본문 
+System V Mechanisms
+---------------------------------
 
 
-Implementation Strategies
--------------------------
-
-.. 본문 
+Semaphores
+---------------------------------
 
 
-Elements of the Kernel
-----------------------
+Message Queues
+---------------------------------
 
-.. 본문 
+
+Shared Memory
+---------------------------------
+
+
+5.4 Other IPC Mechanisms
+=========================================
+
+
+Signals
+---------------------------------
+
+
+Pipes and Sockets
+---------------------------------
+
+
+Summary
+=========================================
+
+
+

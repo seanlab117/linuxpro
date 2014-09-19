@@ -26,7 +26,6 @@ Professional Linux Kernel Architecture
    linuxpro/chapter17
    linuxpro/chapter18
    linuxpro/chapter19
-   linuxpro/chapter20
    linuxpro/chapter20_AppendixA
    linuxpro/chapter20_AppendixB
    linuxpro/chapter20_AppendixC
