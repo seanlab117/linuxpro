@@ -117,7 +117,7 @@ Chapter 1:Introduction and Overview
  그림에서는 표시하지 않았지만 각각의 하위 시스템은 다양한 부수적인 방법으로 상호 작용을 한다는
  것을 명심하길 바란다.
 
-  .. image:: ./images/Fig1-1.png
+.. image:: ./images/Fig1-1.png
 
 
 1.3.1 Processes, Task Switching, and Scheduling
@@ -158,7 +158,7 @@ Chapter 1:Introduction and Overview
   트리구조의 맨 상단에 있다.
 
 
- .. code-block:: console
+.. code-block:: console
 
     $ pstree
 
@@ -168,6 +168,7 @@ Chapter 1:Introduction and Overview
 
 
 .. image:: ./images/Fig1-1_00001.jpg
+
 
 
   어떻게 이런 트리가 확장해가느냐는 새로운 프로세스가 어떻게 생성되어가느냐에 아주 밀접하게 연관이 있다.
@@ -399,6 +400,7 @@ Virtual and Physical Address Spaces
 
 
 .. image:: ./images/Fig1-7.jpg
+
 
    가상화 주소의 첫번째 부분은 page global directory (PGD)를 참조한다.  이것은 각 프로세스들을 위해서 정확히 한번
    존재하는 어레이에서 인덱스로서 사용되어진다. 그것의 시작점은 page middle director( PMD) 라고 불리는 다음 어레이의
@@ -736,6 +738,8 @@ Swapping and Page Reclaim
 
 .. image:: ./images/Fig1-11.jpg
 
+
+
    struct list_head는 그것이 데이터 구조에서 포함될때 리스트 엘리먼트라고 불리운다. 리스트로서 시작점으로 제공되는
    엘리먼트는 list head라고 불리운다.
 
@@ -749,6 +753,8 @@ Swapping and Page Reclaim
 
 
 .. image:: ./images/Fig1-12.jpg
+
+
 
    리스트를 다루고 실행하는 표준화된 함수들이 있다. 다음장들에서 계속하게 접하게 될것이도 ( 그것들이 전달 변수 데이터
    타입은  struct list_head 이다)
