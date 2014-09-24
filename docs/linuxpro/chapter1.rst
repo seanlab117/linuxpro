@@ -878,6 +878,32 @@ General Kernel Objects
 .. image:: ./images/Table1-1.jpg
 
 
+   하나의 스트럭처에서 단일값의 캡슐화는 그 값을 직접 조작하지 못하도록 선택되어진다.
+   kref_init은 초기화로 항상 사용되어져야 한다.만약 오브젝트가 사용된다면, kref_get은 참조 카운터값이 증가하기전에
+   호출되어져야만 한다.kref_put은 오브젝트가 더이상 사용할 수 없을때 카운터를 내린다.
+
+
+Sets of Objects
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   많은 경우에, 서로 다른 커널 오브젝트를 하나의 셋으로 그룹할 필요가 있다- 예를 들면,모든 캐릭터 디비이스 셋 또는
+   PCI 베이스 디바이스들의 셋. 이러한 목적으로 제공되는 데이터 구조는 다음과 같다.
+
+.. code-block:: console
+
+   <kobject.h>
+   struct kset {
+              struct kobj_type  *ktype;
+              struct list_head   list;
+          ......
+              struct kobject   kobj;
+              struct kset_uevent_ops  * uevent_ops;
+
+    };
+
+ 
+
+
 
 
 
