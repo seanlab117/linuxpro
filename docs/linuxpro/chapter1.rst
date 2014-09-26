@@ -826,18 +826,24 @@ General Kernel Objects
 
 
 
-.. code-block:: console
+
+
 
     kobject들이 포인터에 의해 다른 데이터 구조들과 링크되어 있지 않고 바로 임베디드 되어 있다는 것은 필수이다.
     커널 오브젝트 자체를 관리한다는 것은 모든 이러한 오브젝트를 이런 방법으로 관리한다는 것이다. struct kobject가
     커널의 많은 데이터 구조에 임베디드되어 있기때문에 개발자들은 그것을 가볍게 생각한다. 이러한 데이터 구조에 새로운
     요소를 추가하는것은 다은 데이터 구조의 사이즈 증가 결과를 초래한다. 임베디드 된 커널 오브젝트는 다음과 같다.
 
+.. code-block:: console
+
     struct sample{
     .........
          struct kobject kobj;
      .........
     };
+
+
+
 
 
    각각의 struct kobject 요소의 의미는 다음과 같다.
@@ -871,6 +877,9 @@ General Kernel Objects
            atomic_t refcount;
    };
 
+
+
+
    refcount는 하나의 오브젝트가 현재 사용되어지는 커널에서 위치 번호를 특화하기 위한 원자 데이터 타입이다.
    카운터가 0이 되었을때, 그 오브젝트는 더이상 필요하지 않고 메모리로부터 삭제되어진다.
 
@@ -902,6 +911,8 @@ Sets of Objects
     };
 
 
+
+
    재미있는것은, kset은 커널 오브젝트 사용을 위해서 처음 샘플로 제공된다. 셋에 대한 관리 구조는 커널 오브젝트 그 이상이
    아니기때문에 이전에 논의된 struct kobj를 통해 관리될 수 있다. 진실로, 인스턴스는 kobj안에 탑재되어 있다.이것은 셋에
    포함된 kobjects들과는 상관이 없다. 단지 kset 오브젝트 자체로서 특성을 관리하는데 기여한다.
@@ -925,6 +936,8 @@ Sets of Objects
         struct sysfs_ops * sysfs_ops;
         struct attribute ** default_attrs;
      };
+
+
 
    kobj_type은 다양한 커널 오브젝트를 모으는데 사용되지 않는다. 이것은 ksets에 의해서 이미 관리되어진다.
    대신 이것은 sysfs 파일시스템에 인터페이스를 제공한다.( 13장에서 다룸). 만약 다중 오브젝트가 파일시스템을 통해
