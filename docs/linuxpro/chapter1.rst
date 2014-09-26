@@ -811,7 +811,7 @@ General Kernel Objects
 
    다른 데이터 구조에 임베디드 되어 있는 다음의 데이터 구조는 기본 구조로 사용된다.
 
-::
+.. code-block:: console
 
     <kobject.h>
         struct kobject {
@@ -936,6 +936,7 @@ Sets of Objects
         struct sysfs_ops * sysfs_ops;
         struct attribute ** default_attrs;
      };
+
 
 
 
