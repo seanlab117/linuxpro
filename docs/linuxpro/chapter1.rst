@@ -166,7 +166,7 @@ Chapter 1:Introduction and Overview
 아래 트리 구조로 보여진다.
 
 
-.. image:: ./images/Fig1-1_00001.jpg
+.. image:: ./images/Fig1-1_00001.png
 
 
 
@@ -205,7 +205,7 @@ Threads
    위한 것은 있다.
    Figure 1-2 트레트가 있고 없는 프로그램의 차이를 나타낸다.
 
-.. image:: ./images/Fig1-2.jpg
+.. image:: ./images/Fig1-2.png
 
 
    리눅스는 트레드를 생성하기 위한 clone 메쏘드를 제공한다. 이것은 fork와 유사한 방법으로 동작되지만 어떤 리소스가
@@ -257,7 +257,7 @@ Namespaces
    리눅스는 가상 주소 공간을 커널 공간 과 유저 공간으로 나눌 수 있다.
    하기 Fig 1-3에 표시되어졌다.
 
-.. image:: ./images/Fig1-3.jpg
+.. image:: ./images/Fig1-3.png
 
 
    시스템에 있는 모든 유저 프로세스들은 0에서 TASK_SIZE 길이만큼 확장할 수 있는 가상 주소를 갖는다.
@@ -298,7 +298,7 @@ Privilege Levesls
     수 없다. 이것은 커널의 신성한 부분이다. 이러한 메카니즘은 서로의 데이터에 의도하지 않은 영향을 끼치지 못하도록
     하고 있다.
 
-.. image:: ./images/Fig1-4.jpg
+.. image:: ./images/Fig1-4.png
 
 
    유저모드에서 커널모드에의 변환은 system calls 라는 특별한 변이방법으로 만들어 진다; 이것은 시스템에따라 다르게
@@ -328,10 +328,10 @@ Privilege Levesls
 
 
 
-.. image:: ./images/Fig1-5-1.jpg
+.. image:: ./images/Fig1-5-1.png
 
 
-.. image:: ./images/Fig1-5.jpg
+.. image:: ./images/Fig1-5.png
 
    다중프로세서 시스템에서,많은 트레드는 CPU 기준으로 시작되고 유일한 하나의 프로세서에서만 실행되도록 제한되어진다.
    이것은 커널 트레드 이름에 부가적으로 슬래시와 CPU 숫자로 표시된다.
@@ -354,7 +354,7 @@ Virtual and Physical Address Spaces
    이러한 부분을 pages 라고 한다. 물리적 메모리 또한 동일 사이즈의 페이지들로 구분되어진다.
 
 
-.. image:: ./images/Fig1-6.jpg
+.. image:: ./images/Fig1-6.png
 
 
    Fig 1-6은 가상화 주소 공간에 있는 페이지들이 어떻게 물리적 페이지에 걸쳐 있는지를 보여준다. 예를 들면 프로세스
@@ -398,7 +398,7 @@ Virtual and Physical Address Spaces
    그림을 간략화하기 위해, 나는 여기서 3 레벨 변수를 고집한다.
 
 
-.. image:: ./images/Fig1-7.jpg
+.. image:: ./images/Fig1-7.png
 
 
    가상화 주소의 첫번째 부분은 page global directory (PGD)를 참조한다.  이것은 각 프로세스들을 위해서 정확히 한번
@@ -484,7 +484,7 @@ The Buddy System
    쌍으로 만들어 버린다. Figure 1-8은 초기에 두개의 블럭 8개의 페이지로 구성된 버디 한쌍의 예를 보여준다.
 
 
-.. image:: ./images/Fig1-8.jpg
+.. image:: ./images/Fig1-8.png
 
 
    동일한 사이즈의( 1,2,4,8,16,....pages) 모든 버디들은 스페셜 리스트에 있는 커널에 의해 관리되어진다.  2번의 8
@@ -546,7 +546,7 @@ Swapping and Page Reclaim
    초기화 한다. 커널은 디스크에 있는 데이터를 RAM에 스왑할 수 있는 기회를 가진다. 페이지 폴트에에 대해서 알지 못하면
    페이지의 스왑인,스왑아웃은 프로세스에게 있어서 전적으로 불가능하다.
 
-.. image:: ./images/Fig1-9.jpg
+.. image:: ./images/Fig1-9.png
 
 
    페이지 반환(page reclaim)은 하위의 블락 디바이스를과의 조율된 매핑을 동기화 하는데 사용된다. 이러한 이유로
@@ -655,7 +655,7 @@ Swapping and Page Reclaim
   한다).
   Figure 1-10 도식화 하였다.
 
-.. image:: ./images/Fig1-10.jpg
+.. image:: ./images/Fig1-10.png
 
 
 1.3.11 Modules and Hotplugging
@@ -722,11 +722,11 @@ Swapping and Page Reclaim
    만약에 여러개의 리스트로 구성되어진다면- 이것은 이상하지 않지만- 몇개의  list_head 요소는 필요하다.
 
 
-.. image:: ./images/Fig1-10_00000.jpg
+.. image:: ./images/Fig1-10_00000.png
 
    이러한 엘리먼트는 다음의 데이터 구조에 위치할 수 있다.
 
-.. image:: ./images/Fig1-10_00001.jpg
+.. image:: ./images/Fig1-10_00001.png
 
 
    링크드 리스트이 시작점은 또한  LIST_HEAD(list_name)에 의해서 선언되고 초기화되는 list_head의 인스턴스다.
@@ -735,7 +735,7 @@ Swapping and Page Reclaim
    접근을 허용한다.
 
 
-.. image:: ./images/Fig1-11.jpg
+.. image:: ./images/Fig1-11.png
 
 
 
@@ -751,7 +751,7 @@ Swapping and Page Reclaim
     포인터에 시간 낭비함 없이 핵심 상세에 집중하고자 함이다.
 
 
-.. image:: ./images/Fig1-12.jpg
+.. image:: ./images/Fig1-12.png
 
 
 
@@ -883,7 +883,7 @@ General Kernel Objects
    카운터가 0이 되었을때, 그 오브젝트는 더이상 필요하지 않고 메모리로부터 삭제되어진다.
 
 
-.. image:: ./images/Table1-1.jpg
+.. image:: ./images/Table1-1.png
 
 
    하나의 스트럭처에서 단일값의 캡슐화는 그 값을 직접 조작하지 못하도록 선택되어진다.
@@ -1018,7 +1018,7 @@ Byte Order
 
    Figure 1-13은 다음 이슈를 표시한다.
 
-.. image:: ./images/Table1-13.jpg
+.. image:: ./images/Table1-13.png
 
    커널은 CPU에 의해서 사용되어지는 포맷과 특별한 용도로서의 변환을 위해  다양함 함수와 매크로를 제공한다 : cpu_to_le64는
    64 bit 데이터 타입을 little endian 포맷으로 변환한다. le64_to_cpu는 반대의 경우를 실행한다. 변환 방법들은 모든 64,32
