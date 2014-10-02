@@ -770,7 +770,7 @@ struct list_head는 그것이 데이터 구조에서 포함될때 리스트 엘�
 엘리먼트는 list head라고 불리운다.
 
 
- .. code-block:: console
+.. note::
 
     하나의 리스트의 처음과 끝의 구성요소를 연결하는 포인터는 이미지들을 채우는 경향이 있다 그리고 종종 다양한 커널의
     데이터 구조들의 연결을 간결화 하기 위한 그림의 애초의 의도를 흐리게 한다. 그래서 보통 그림에서 리스트 시작과 리스트
@@ -796,9 +796,6 @@ struct list_head는 그것이 데이터 구조에서 포함될때 리스트 엘�
                       member).ptr 는 데이터 구조체의 list_heard 인스턴스 포인터이다.  다음의 샘플 호출은 리스트의
                       task_struct 인스턴스를 찾는데 필요하게 될 것이다.
 
-
-.. code-block:: console
-
                        struct task_struct=list_entry(ptr,struct task_struct,run_list)
 
 
@@ -806,6 +803,7 @@ struct list_head는 그것이 데이터 구조에서 포함될때 리스트 엘�
                        리스트에 포함된 데이터 구조들이 있는지 정확한 엘리먼트를 찾도록 특화되어야만 한다.
 
    #   list_for_each(pos,head)  리스트의 모든 엘리먼트를 걸쳐서 반복적으로 사용되어져야만 한다.
+
 
 .. code-block:: console
 
