@@ -164,6 +164,7 @@ pstree 프로그램에 의해 그래픽으로 보여진것처럼, 트리의 브�
 트리구조의 맨 상단에 있다.
 
 
+.. code-block:: console
 
     $ pstree
 
@@ -735,12 +736,25 @@ C 프로그래밍에 있어서 반복되는 태스크는 이중 링크드 리스
 가지지 않는다. 리스트 되어진 데이터 구조들은 list_head  타입의 요소를 포함해야 한다; 이것은 선후 포인터를 수용하게 된다.
 만약에 여러개의 리스트로 구성되어진다면- 이것은 이상하지 않지만- 몇개의  list_head 요소는 필요하다.
 
+.. code-block:: console
 
-.. image:: ./img/fig1_10_0.png
+
+      <list.h>
+            struct list_head {
+            struct list_head *next, *prev;
+            };
+
+
 
 이러한 엘리먼트는 다음의 데이터 구조에 위치할 수 있다.
 
-.. image:: /img/fig1_10_1.png
+.. code-block:: console
+
+       struct task_struct {
+        ...
+       struct list_head run_list;
+        ...
+       };
 
 링크드 리스트이 시작점은 또한  LIST_HEAD(list_name)에 의해서 선언되고 초기화되는 list_head의 인스턴스다.
 이러한 방법으로, 커널은 순환전인 리스트를 Figure 1-1 처럼 만든다.
@@ -783,14 +797,17 @@ struct list_head는 그것이 데이터 구조에서 포함될때 리스트 엘�
                       task_struct 인스턴스를 찾는데 필요하게 될 것이다.
 
 
+.. code-block:: console
 
                        struct task_struct=list_entry(ptr,struct task_struct,run_list)
+
 
                        리스트 구현은 타입 안정성이지 않기때문에 명시적인 타입 기준이 필요하다. 리스트 엘리먼트는 여러개의
                        리스트에 포함된 데이터 구조들이 있는지 정확한 엘리먼트를 찾도록 특화되어야만 한다.
 
    #   list_for_each(pos,head)  리스트의 모든 엘리먼트를 걸쳐서 반복적으로 사용되어져야만 한다.
 
+.. code-block:: console
 
                        struct list_head *p;
 
@@ -798,6 +815,8 @@ struct list_head는 그것이 데이터 구조에서 포함될때 리스트 엘�
                               if (condition)
                                         return list_entry(p,struct task_struct,run_list);
                         return NULL;
+
+
 
 1.3.14 Object Management and Reference Counting
 ------------------------------------------------
@@ -811,10 +830,10 @@ struct list_head는 그것이 데이터 구조에서 포함될때 리스트 엘�
 
 일반적인 커널 오브젝트 메카니즘은 오브젝트에서 다음 동작을 수행함때 사용되어 질 수 있다.
 
-   # 참조 카운팅
-   # 리스트 오브젝트들의 관리
-   # 셋 락킹
-   # 오브젝트 특성들을 유저스페이스로 출력하는 것(sysfs 시스템을 통해)
+   - 참조 카운팅
+   - 리스트 오브젝트들의 관리
+   - 셋 락킹
+   - 오브젝트 특성들을 유저스페이스로 출력하는 것(sysfs 시스템을 통해)
 
 
 
@@ -823,7 +842,7 @@ General Kernel Objects
 
 다른 데이터 구조에 임베디드 되어 있는 다음의 데이터 구조는 기본 구조로 사용된다.
 
-
+.. code-block:: console
 
     <kobject.h>
         struct kobject {
@@ -846,7 +865,7 @@ kobject들이 포인터에 의해 다른 데이터 구조들과 링크되어 있
 커널의 많은 데이터 구조에 임베디드되어 있기때문에 개발자들은 그것을 가볍게 생각한다. 이러한 데이터 구조에 새로운
 요소를 추가하는것은 다은 데이터 구조의 사이즈 증가 결과를 초래한다. 임베디드 된 커널 오브젝트는 다음과 같다.
 
-
+.. code-block:: console
 
     struct sample{
     .........
@@ -882,7 +901,7 @@ kobject와 컨셉상의 object,잘 알려지고 C++이나 Java와 같은 객체�
 
 참조를 관리하기 위해 사용되어지는 kref 구조의 레이아웃은 다음과 같다.
 
-
+.. code-block:: console
 
    <kref.h>
    struct kref{
@@ -910,7 +929,7 @@ Sets of Objects
 많은 경우에, 서로 다른 커널 오브젝트를 하나의 셋으로 그룹할 필요가 있다- 예를 들면,모든 캐릭터 디비이스 셋 또는
 PCI 베이스 디바이스들의 셋. 이러한 목적으로 제공되는 데이터 구조는 다음과 같다.
 
-
+.. code-block:: console
 
    <kobject.h>
    struct kset {
@@ -940,7 +959,7 @@ PCI 베이스 디바이스들의 셋. 이러한 목적으로 제공되는 데이
 
 또다른 구조는 커널 오브젝트의 일반적인 특성을 그룹화하는데 사용된다. 이것은 다음과 같이 정의된다:
 
-
+.. code-block:: console
 
     <kobject.h>
         struct kobj_type {
@@ -962,6 +981,8 @@ Reference Counting
 
 레퍼런스 카운팅은 커널에서 얼마나 많은 부분을 하나의 오브젝트가 사용하고 있는가를 탐지하기 위하여 사용된다.
 커널의 한 부분이 오브젝트에 포함된 정보를 필요로할때마다.
+
+.. code-block:: console
 
    <kobject.h>
    struct kobj_type{
@@ -1160,6 +1181,8 @@ Access to Userspace
 시스템 로그에 경고 메세지를 추가함으로서 다소 이런 상황을 다루어야한다.어쨋든 이러한 상세들은 실제로 중요한 관점으로
 보게 될것이다.
 
+.. code-block:: console
+
    kernel/nsproxy.c
         static struct nsproxy *create_new_namespaces(unsigned long flags,
                                                  struct task_struct *tsk, struct fs_struct *new_fs)
@@ -1196,6 +1219,7 @@ Access to Userspace
                 kmem_cache_free(nsproxy_cachep, new_nsp);
                 return ERR_PTR(err);
         }
+
 
 
 코드가 상세하게 있다는것은 지금 관련이 없다; 다음장에서 다시 이부분을 다루겠다. 중요한것은 이 루틴이 클론 동작을
