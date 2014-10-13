@@ -148,27 +148,263 @@ Figure2-1에서는 확실하지 않다. 또한 관과해야할 사실은 리눅�
 시스템은 모든 프로세스들을 하나의 프로세스 테이블에 저장한다. - 그것들이 실행하던지,잠자고 있던지,대기하고 있던지 상관
 없이, 어쨌든,잠자고 있는 프로세스들은 그것들이 실행 준비가 되지 않았다는것을 알 수 있도록 특별히 표시되어진다.
 (섹션 2.3에 이것이 어떻게 구현되었는지 볼수 있다). 거기에는 또한 잠자고 있는 프로세스들을 적당한 시간에-예를 들면
- 그 프로세스가 일어나기를 바라고 있는 외부 이벤트가 있을때-깨울수 있도록 그룹화할 수 있는 많은 큐들이 있다.
+그 프로세스가 일어나기를 바라고 있는 외부 이벤트가 있을때-깨울수 있도록 그룹화할 수 있는 많은 큐들이 있다.
 
- Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
+Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
 
 
 .. image:: ./img/fig2_2.png
 
 
+누적된 실행 프로세스들과 다양한 변이으 실험을 시작해 봅시다;그 프로세스는 실행할 준비가 되었지만 CPU가 다른 프로세스에
+할당되어 있기때문에 허락되지 않는다.(그 상태는 따라서 대기상태이다). 그것은 스케줄러가 CPU 시간을 허락할때까지 이 상태로
+남아있다.일단 이것이 발생하면,이 상태는 실행단계로 변화된다(path 4).
+
+스케줄러가 그 프로세스로부터 CPU 리소스를 철회하기를 결정할때-나는 짧게 그 이유를 다룬다- 그 프로세스의 상태는 실행에서
+대기상태로 변화하고 사이클은 새롭게 시작된다.거기에는 사실상 그것들이 신호에 의해서 방해되어질 수 있는지 없는지에 따라
+달라지는 2개의 잠자는 상태가 있다. 순간, 이러한 차이점은 중요하지 않고,우리가 그 구현을 좀더 면밀히 조사할때 관련성이
+있다.
+
+만약 프로세스가 이벤트를 기다려야만 한다면,그 상태는 실행에서 슬리핑 상태로 변한다(path 1).어쨌든,그것은 슬리핑에서 실행단계로
+바로 변화할 수 없다; 일단 대기하고 있던 이벤트가 발생하기만 하면,프로세스는 대기 상태(path 3)로 돌아가고 일반적인 사이클로
+돌아간다.
+
+일단 프로그램 실행이 종료가되면(예를들면, 사용자가 그 프로그램을 종료한다),그 프로세스는 실행단계에서 정지상태로 변한다
+(path 5)
+
+위에서는 언급되지 않은 특별한 프로세스는 좀비 상태이다. 이름이 말하듯이, 그러한 프로세스들은 존재하지 않지만 아직도
+다소 살아있다. 실제로 그것들은 그들의 리소스가 다시 실행될 수 없고 결코 발생되지 않도록 이미 해제되었기때문에
+죽는다(RAM, 병렬연결등). 어쨌든, 프로세스 테이블에서 그것들의 출입이 있기때문에 아직도 살아있다.
+
+어떻게해서 좀비가 나올까? 그 이유는 유닉스하에 있는 프로세스 생성 종료 구조에 있다.  하나의 프로그램은 2개의 이벤트가
+발생할때 종료된다- 첫째 그 프로그램은 다른 프로세스에 의해 또는 유저에 의해  종료되어져야만 한다(이것은 보통 정상적으로
+프로세스를 종료시키는 SIGTERM또는 SIGKILL을 보냄으로써 이루어진다); 두번째로, 그 프로세스의 기원인 부모 프로세스는 자식
+프로세스가 종료될때 wait4 시스템 콜을 활성화 하거나 이미 활성화 시켜야 한다. 이것은 부모 프로세스는 자식 프로세스의
+종료를 인식하고 있다는 것을 커널에게 확인시켜 주는 것이다. 시스템 콜은 자식 프로세스에 의해서 점유되어지는 리소스를
+커널이 해제하도록 해준다.
+
+좀비는 두번째(wait4)가 아니고 첫번째 상태가 적용될때(그 프로그램이 종료되었을때) 발생된다. 하나의 프로세스는 종료와
+프로세스 테이블에서 자신의 데이터를 제거하는 사이에 아주 짧게 좀비 상태로 항상 변한다.어떠한 경우에 (예를 들면
+부모 프로세스가 나쁘게 프로그램되어 있고 wait 콜을 발행하지 않을때), 좀비는 확고히 자기 자신을 프로세스 테이블에
+적재할 수 있고 다음 리부팅때까지 그곳에 남아 있다. 이것은 ps 나 top같은 프로세스 툴의 결과를 읽어봄으로써 볼수 있다.
+이것은 커널에서 아주 작은 공간을 차지하는 남아있는 데이타로서 문제가 거의 되지 않는다.
 
 
 
 
+2.2.1 Preemptive Multitasking
+--------------------------------
+
+리눅스 프로세스 관리의 구조는 2개의 심도있는 프로세스 상태 옵션을 필요로 한다- 유저 모드와 커널모드. 이런것들은
+모든 근래의 CPU들은 적어도 2개의 다른 실행모드를 가진다는 사실을 대변한다. 다른 하나는 다양한 제한 조건을 가지는반면
+다른 하나는 무한한 권한을 가진다- 예를들면,어떤 메모리 영역에 접근은 제한되어질 수 있다. 이러한 차이점은  기존의 프로세스
+들을 유지하고 그것들을 시스템의 다른 부분으로부터 방해받지 못하도록 하는 폐쇄된 새장을 만드는것에 중요한 선결조건이다.
+
+보통 커널은 자기 자신으 데이터를 접근하고 시스템에 있는 다른 어플리케이션을 방해할 수 없는 유저모드에 있다-그것은 보통
+커널 주변에 다른 프로그램이 있다는것조차 알리지 않는다.
+
+하나의 프로세스가 시스템 데이터나 함수를 접근하고자 한다면(후자는 모든 프로세스들간에 공유되어지는 리소스들을 관리한다
+,예를들면, 파일시스템 공간),그것은 커널모드로 변환되어야 한다. 명확하게, 이것은 컨트롤에 리고 명확하게 정의된 경로를 통해
+의해서만 단지 가능하다-그렇지 않으면 모든 성립된 보호 메카니즘은 넘쳐나게 될것이다.1장에서 시스템 콜은 모드간 전환할 수
+있는 유일한 방법이라고 짧게 언급했다. 13장에서는 그러한 콜에 대한 구현을 심도있게 논할것이다.
+
+유저모드에서 커널모드로 전환하는 2번째 방법은 인터럽트에 의한 것이다-전환은 자동적으로 발생된다. 유저 어플리케이션에 의해
+의도적으로 발생되는 시스템 콜과는 다르게 , 인터럽트들은 다소 임의적으로 발생한다. 일반적으로 인터럽트를 다룰때 필요로하는
+앱션들은 인터럽트가 발생했을때의 프로세스 실행과는 상관이 없다. 예를들면,인터럽트는 외부 블럭 디바이스가 데이터를 RAM으로
+변환할때, 그리고 이러한 데이터는  시스템에서 실행되고 있는 어떤 프로세스를 위해서 의도적일지도 모를지라도, 발생된다.
+유사하게, 수신 네트웍 패키지들은 인터럽트의 방법으로 알려진다. 또한, 그것은 현재 실행되는 프로세스를 위해서 의도적이지는
+않은것 같다.이러한 이유로, 리눅스는 실행되는 프로세스가 전적으로 그것들을 인식하지 못하도록하는 방법으로 이러한 행동들을
+수행한다.
+
+커널의 선점적인 스케줄링 모델은  그 프로세스의 상태가 그것의 다른 상태에 의해서 방해될지 모른다는 것을 결정하는 구조를
+만들어야 한다.
 
 
-Preemptive Multitasking
---------------------------
+   - 일반적인 프로세스들은 항상 방해될지도 모르겠다-다른 프로세스들에 의해서조차도. 중요한 프로세스가 실행될때-예를들면,
+     어떤 저자가 오랫동안 기다리는 키보드 입력을 기다릴때- 스케줄러는 현재 프로세스가 잘 실행되고 있더라도 그 프로세스를
+     바로 실행시킬지 결정할 수 있다. 이러한 종류의 선점은 좋은 상호 작용과 낮은 시스템 잠재에 중요한 공헌을 한다.
+
+   - 그 시스템이 커널에 있고 시스템 콜을 수행하고 있다면,시스템에 있는 어떤 다른 프로세스도 CPU 시간을 회수할 단초를 줄
+     수 없다. 그 스케줄러는 그것이 다른 프로세스를 선택할 수 있기전에 시스템 콜의 실행이 종료될때까지 기다리게 되어진다.
+     어쨌든, 그 시스템 콜은 인터럽트에 의해서 연기되어질 수 있다.
+
+   - 인터럽트들은 유저모드와 커널모드에서 프로세스들을 연기시킬 수 있다. 그것들은 가능한 빨리 그것들이 생성된후에
+     그것들을 다루는것이 필수이기때문에 높은 우선권을 가진다.
+
+
+커널 선점으로 알려진 한가지 옵션이 커널 2.5를 개발하는동안 커널에 추가되었다. 이 옵션은 , 이것이 급하게 필요하다면,커널
+모드에서 시스템 콜의 실행동안조차도 다른 프로세스들로 전환되는것을 지원한다(그러나 인터럽트 동안은 아니다). 커널이
+시스템 콜을  가능한 빨리 실행하도록 시도하더라도, 필요한 그 시간은 연속된 데이터 스트리밍에 의존하는 어떤 어플리케이션에
+대해 너무 오래일지도 모르겠다. 커널 선점은 그러한 대기 시간을 줄여줄 수 있고 좀더 부드러운 프로그램 실행을 확신해준다.
+어쨌든, 이러한것은 많은 데이터 구조들이 단일 프로세서 시스템에서조차도 동시 발생되는 접근을 보호할 필요성이 있기때문에
+증가되는 커널의 복잡성의 비용에 있다.
 
 
 
 2.3 Process Representation
 ==============================
+
+프로세스와 프로그램에 관련된 리눅스 커널의 모든 알고리즘은 task_struct라고 이름불려지고 include/sched.h에 정의된
+데이터 구조에 구성되어진다. 이것은 시스템에 있어서 중요 구조중에 하나이다. 스케줄러 구현에 관해서 다루는것으로 넘어가기전에
+어떻게 리눅스가 프로세스를 관리하는지 시험하는것이 필수이다.
+
+태스크 구조는 아래에서 다룰 커널의 하위 시스템과 그 프로세스를 연결하는 수많은 요소들을 포함한다. 나는 그래서 그것들의
+상세 지식없이는 어떤 요소의 중요성을 설명하기 어렵기때문에 이후 장을 종종 참조한다.
+
+태스크 구조는 아래와 같다- 간단한 형태로서
+
+
+.. code-block:: console
+
+<sched.h>
+    struct task_struct {
+        volatile long state; /* -1 unrunnable, 0 runnable, >0 stopped */
+        void *stack;
+        atomic_t usage;
+        unsigned long flags; /* per process flags, defined below */
+        unsigned long ptrace;
+        int lock_depth; /* BKL lock depth */
+        int prio, static_prio, normal_prio;
+        struct list_head run_list;
+        const struct sched_class *sched_class;
+        struct sched_entity se;
+        unsigned short ioprio;
+        unsigned long policy;
+        cpumask_t cpus_allowed;
+        unsigned int time_slice;
+#if defined(CONFIG_SCHEDSTATS) || defined(CONFIG_TASK_DELAY_ACCT)
+        struct sched_info sched_info;
+#endif
+        struct list_head tasks;
+        /*
+        * ptrace_list/ptrace_children forms the list of my children
+        * that were stolen by a ptracer.
+        */
+        struct list_head ptrace_children;
+
+        struct list_head ptrace_list;
+        struct mm_struct *mm, *active_mm;
+/* task state */
+        struct linux_binfmt *binfmt;
+        long exit_state;
+        int exit_code, exit_signal;
+        int pdeath_signal; /* The signal sent when the parent dies */
+        unsigned int personality;
+        unsigned did_exec:1;
+        pid_t pid;
+        pid_t tgid;
+        /*
+        * pointers to (original) parent process, youngest child, younger sibling,
+        * older sibling, respectively. (p->father can be replaced with
+        * p->parent->pid)
+        */
+        struct task_struct *real_parent; /* real parent process (when being debugged) */
+        struct task_struct *parent; /* parent process */
+        /*
+        * children/sibling forms the list of my children plus the
+        * tasks I’m ptracing.
+        */
+        struct list_head children; /* list of my children */
+        struct list_head sibling; /* linkage in my parent’s children list */
+        struct task_struct *group_leader; /* threadgroup leader */
+        /* PID/PID hash table linkage. */
+        struct pid_link pids[PIDTYPE_MAX];
+        struct list_head thread_group;
+        struct completion *vfork_done; /* for vfork() */
+        int __user *set_child_tid; /* CLONE_CHILD_SETTID */
+        int __user *clear_child_tid; /* CLONE_CHILD_CLEARTID */
+        unsigned long rt_priority;
+        cputime_t utime, stime, utimescaled, stimescaled;;
+        unsigned long nvcsw, nivcsw; /* context switch counts */
+        struct timespec start_time; /* monotonic time */
+        struct timespec real_start_time; /* boot based time */
+        /* mm fault and swap info: this can arguably be seen as either
+        mm-specific or thread-specific */
+        unsigned long min_flt, maj_flt;
+        cputime_t it_prof_expires, it_virt_expires;
+        unsigned long long it_sched_expires;
+        struct list_head cpu_timers[3];
+/* process credentials */
+        uid_t uid,euid,suid,fsuid;
+        gid_t gid,egid,sgid,fsgid;
+        struct group_info *group_info;
+        kernel_cap_t cap_effective, cap_inheritable, cap_permitted;
+        unsigned keep_capabilities:1;
+        struct user_struct *user;
+        char comm[TASK_COMM_LEN]; /* executable name excluding path
+        - access with [gs]et_task_comm (which lock
+        it with task_lock())
+        - initialized normally by flush_old_exec */
+/* file system info */
+        int link_count, total_link_count;
+/* ipc stuff */
+        struct sysv_sem sysvsem;
+/* CPU-specific state of this task */
+        struct thread_struct thread;
+/* filesystem information */
+        struct fs_struct *fs;
+/* open file information */
+        struct files_struct *files;
+/* namespace */
+        struct nsproxy *nsproxy;
+/* signal handlers */
+        struct signal_struct *signal;
+        struct sighand_struct *sighand;
+        sigset_t blocked, real_blocked;
+        sigset_t saved_sigmask; /* To be restored with TIF_RESTORE_SIGMASK */
+        struct sigpending pending;
+        unsigned long sas_ss_sp;
+        size_t sas_ss_size;
+        int (*notifier)(void *priv);
+        void *notifier_data;
+        sigset_t *notifier_mask;
+#ifdef CONFIG_SECURITY
+        void *security;
+#endif
+/* Thread group tracking */
+        u32 parent_exec_id;
+        u32 self_exec_id;
+/* journalling filesystem info */
+        void *journal_info;
+/* VM state */
+        struct reclaim_state *reclaim_state;
+        struct backing_dev_info *backing_dev_info;
+        struct io_context *io_context;
+        unsigned long ptrace_message;
+        siginfo_t *last_siginfo; /* For ptrace use. */
+        ...
+    };
+
+
+인정하건데, 이러한 구조에 있는 많은 정보를 요약하는것은 어렵다. 어쨌든, 구조 내용물은 섹션으로 쪼갤 수 있고, 그것들의
+각각은 그 프로세스의 특별한 모습을 표현한다.
+
+   - 대기중인 신호,사용되어진 바이너리 포맷, 프로세스 인식자(pid),보모 그리고 다른 관계된 프로세스들의 포인터들,
+     우선권 그리고 프로그램 실행에 있어서 시간 정보와 같은 실행 정보와 상태
+
+   - 가상 메모리에 할당된 정보
+
+   - 유저 그리고 그룹 ID, 능력들등과 같은 프로세스 보안들. 시스템 콜은 이러한 데이터들을 요청하는데 사용되어질 수 있다.
+     나는 이러한 것들을 특별한 하위 시스템을 설명할때 좀더 상세하게 다룬다.
+
+   - 사용되어지는 파일들:프로그램 코드를 가지는 바이너리 파일뿐 아니라 반드시 저장해야만 하는 프로세스에 의해 다뤄져야
+      하는 모든 파일들에 대한 파일 시스템 정보
+
+   - 프로세스의 CPU 특화된 실행시간 데이타를 기록할 트레드 정보(그 구조에서 남아있는 부분은 사용되어지는 하드웨어에
+     의존적이지 않다)
+
+   - 다른 어플리케이션과 동작할때 필요로 하는 상호 프로세스 통신에 대한 정보
+
+   - 수신 신호에 대응하기 위한 그 프로세스에 의해서 사용되어지는 신호 핸들러
+
+태스크 구조의 많은 멤버들은 단순한 변수들이 아니며  검사되어지는 다른 데이타 구조에 포인터이다.그리고 이러한 것들은
+다음장에서 다루게 될것이다. 현재 장에서는 프로세스 관리 구현에 중요한  task_struct 몇가지 요소만  고려한다.
+
+state는 하나의 프로세스의 현재 상태를 특화하고 다음 값들을 허용한다(이러한 것들은  <sched.sh>에 정의된 사전 프로세서
+변수들이다):
+
+   - TASK_RUNNING 는 태스크가 실행중에 있다는것을 의미한다. 이것은 CPU가 실제로 할당되었다는 것을 의미하지 않는다.
+     태스크는 
 
 
 Process Types
