@@ -256,7 +256,7 @@ Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
 
 .. code-block:: console
 
-<sched.h>
+    <sched.h>
     struct task_struct {
         volatile long state; /* -1 unrunnable, 0 runnable, >0 stopped */
         void *stack;
@@ -450,19 +450,119 @@ state는 하나의 프로세스의 현재 상태를 특화하고 다음 값들�
 setrlimit 시스템 콜은 현재 한계를 증가하거나 감소시키는데 사용된다. 어쨌든, rlim_max에 명기된 값은 넘어가지 않을 수 있다.
 getrlimits는 현재 한계를 체크하는데 사용되어진다.
 
+제한할 수 있는 리소스는 rlim 어레이에서 그들의 위치를 참조함으로써 구별할 수 있다. 이것은 왜 커널이 리소스와 위치에
+관련된 프리프로세서 상수를 정의하는지 이유이다. Table2-1에 그 가능한 변수들과 의미를 정리하였다. 시스템 프로그래밍에 관한
+책은 실제로 다양한 제한적 사용을 상세히 다루었다 그리고 setrlimit 메뉴얼 페이지는 모든 제한을 좀더 상세하게 다루었다.
+
+.. code-block:: console
+
+    리눅스는 특별한 유닉스 시스템과의 바이너리 호환성을 만들기때문에 정수값은 아키텍처마다 다르다.
+
+그 제한은 커널의 매우 다른 부분과 연관이 있기때문에,그 제한이 상응하는 하위 시스템에서 관찰되어지고 있는지 체크해야만
+한다. 이것은 왜 rlimit 시간과 시간을 또 이 책의 후반부에서 만나게 되는지 이유다.
+리소스 타입이 제한범위내에서 사용되어진다면 (거의 대부분의 리소스에 대한 기본 세칭),RLIM_INFINITY는 rlim_max의 값으로
+사용되어진다. 다른 것들중에 예외들은 :
+
+   - 열린 파일의 숫자(RLIMIT_NOFILE, 1,024 가 디폴트이다)
+   - 유저당 최대 프로세스 갯수(RLIMIT_NPROC), 이것은 max_threads/2 로 정의된다. 만약 20개의 트레드에 대한 최소 가능한
+     메모리 사용이 주어진다면,max_threads는 그 값이 얼마나 많은 트레드들이 가용한 RAM의 8/1이 트레드 정보를 관리하는데만
+     사용하게끔 생성되어질지도 모른다라고 표시하는 전역변수이다.
+
+init 태스트의 부트 시간 제한은 include/asm-generic-resource.h에 서 INIT_RLIMITS 로 정의되어 있다.
+
+아직도 이책이 쓰여질때 아직도 개발중이었던 커널 2.6.25는 현재의 rlimit값을 검사하도록 허락하는 proc 파일시스템에서
+하나의 프로세스당 하나의 파일만 포함할 것이다.
+
+
+.. code-block:: console
+
+    wolfgang@meitner> cat /proc/self/limits
+    Limit Soft Limit Hard Limit Units
+    45
+    Chapter 2: Process Management and Scheduling
+    Max cpu time unlimited unlimited ms
+    Max file size unlimited unlimited bytes
+    Max data size unlimited unlimited bytes
+    Max stack size 8388608 unlimited bytes
+    Max core file size 0 unlimited bytes
+    Max resident set unlimited unlimited bytes
+    Max processes unlimited unlimited processes
+    Max open files 1024 1024 files
+    Max locked memory unlimited unlimited bytes
+    Max address space unlimited unlimited bytes
+    Max file locks unlimited unlimited locks
+    Max pending signals unlimited unlimited signals
+    Max msgqueue size unlimited unlimited bytes
+    Max nice priority 0 0
+    Max realtime priority 0 0
+    Max realtime timeout unlimited unlimited us
+
+
+.. image:: ./img/table2_1.png
+
+정보를 만드는 대부분으 코드는 항상 커널 2.6.24에 표시된다 , 그러나 /proc과 관련된 최종 연결은 후속 커널 버젼에서 유일하게
+만들어질것다.
 
 
 
-Process Types
------------------
+2.3.1 Process Types
+---------------------
+
+전통적인 유닉스 프로세스는  바이너리 코드와 발생순서적인 트레드(컴퓨터는 코드를 통해 단일 경로를 따른다,다른 경로는
+동시간대레 실행되지 않는다) 그리고 어플리케이션에 할당된 리소스 셋- 예를 들면, 메모리,파일,등등-등으로 구성된 하나의
+어플리케이션이다.
+새로운 프로세스들은 fork나 exec 시스템 호출을 통해 생성된다.
 
 
-Namespaces
--------------
+   - fork는 현재 프로세스와 동일한 프로세스를 생성한다; 이러한 복사를 차일드 프로세스라고 한다. 원본 프로세스의 모든
+     리소스를은 시스템 호출후에 거기에 동일한 별개의 원본 프로세스의 복사본이 있도록 적당한 방법으로 복사되어진다.
+     이러한 복사본은 어찌됐든 연결되지 않고 ,예를들면,동일한 오픈 파일셋을 가지고 동일한 작업 디렉토리를 가지고 메모리에
+     동일 데이터를(각자 데이터의 자신복제로) 가진다
+
+   - exec는 실행 가능한 바이너리 파일로부터 로딩된 다른 어플리케이션으로 실행 프로세스를 대체한다. 다른말로 하면,새로운
+     프로그램이 로드된다. exec는 새로운 프로세스를 생성하지 않기때문에, 이전 프로그램은 일단 fork를 사용해서 복사되어져야만
+     하고 이때 exec는 시스템에서 추가적인 어플리케이션을 생성하기 위해 불려진다.
 
 
-Process Identification Numbers
-----------------------------------
+리눅스는 항상  모든 유닉스의 정취와 아주 거슬러 올라간 시간에 가능했던 위에서 언급한 두개의 호출에 추가해서  복사
+시스템틀 제공한다. 원칙적으로, clone은 fork와 동일한 방법으로 동작한다, 그러나 새로운 프로세스는 그 부모 프로세스들과
+독립되지 않고 그것과 일정부분 리소스를 공유할 수 있다. 어떤 리소스들이 공유되어지고 어떤것은 복사되어질 지가 가능하다.
+예를들면,메모리에 있는 데이터, 오픈 파일, 또는 부모 프로세스의 인스톨되어진 신호 핸들러등이다.
+
+clone은 트레드를 구현하는데 사용되어진다. 어쨌든, 시스템 호출은 자체적으로 이것을 하기에 충분하지 않다. 라이브러리들은
+완벽한 구현을 위해서  유저스페이스에 항상 필요로 되어진다. 그러한 라이브러리들의 예로는 Linuxthreads 와 Next Generation
+Posix Threads 이다.
+
+
+
+2.3.2 Namespaces
+--------------------------
+
+
+네임스페이스는 다른 모습으로 실행중인 시스템의 전체적인 특성을 우리가 볼수 있도록 해주는 가상화의 작은 버젼을 제공한다.
+그 메카니즘은 솔라리스에서 좀비와 비슷하거나 FreeBSB에서의 jail 메카니즘과 같다.  그 컨셉을 본후에 네임스페이 프레임워크가
+제공하는 구조를 논하겠다.
+
+Concept
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+전통적으로 많은 리소스들은 다른 유닉스 변종에서뿐만 아니라 리눅스에서 전체적으로 관리되어진다. 예를 들면, 시스템에 있는
+모든 프로세스들은  PIDs의 전체 리스트가 커널에 의해서 관리되어져야만 한다는 것을 암시하는 그들의 PID로 관례적으로
+구분되어질 수 있다.비슷하게, uname 시스템 호출에(시스템 이름과 커널에 관한 정보) 의해서 반환되는 그 시스템에 간한 정보는
+모든 호출자들에게 동일하다. 유저 ID는 비슷한 방법으로 관리되어진다: 각 유저는 전체적으로 유일한 UID 숫자로 구분되어진다.
+
+
+
+
+
+
+
+
+
+
+
+2.3.3Process Identification Numbers
+======================================
 
 
 Task Relationships
