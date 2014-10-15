@@ -272,9 +272,9 @@ Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
         unsigned long policy;
         cpumask_t cpus_allowed;
         unsigned int time_slice;
-#if defined(CONFIG_SCHEDSTATS) || defined(CONFIG_TASK_DELAY_ACCT)
+    #if defined(CONFIG_SCHEDSTATS) || defined(CONFIG_TASK_DELAY_ACCT)
         struct sched_info sched_info;
-#endif
+    #endif
         struct list_head tasks;
         /*
         * ptrace_list/ptrace_children forms the list of my children
@@ -284,7 +284,7 @@ Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
 
         struct list_head ptrace_list;
         struct mm_struct *mm, *active_mm;
-/* task state */
+    /* task state */
         struct linux_binfmt *binfmt;
         long exit_state;
         int exit_code, exit_signal;
@@ -324,7 +324,7 @@ Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
         cputime_t it_prof_expires, it_virt_expires;
         unsigned long long it_sched_expires;
         struct list_head cpu_timers[3];
-/* process credentials */
+    /* process credentials */
         uid_t uid,euid,suid,fsuid;
         gid_t gid,egid,sgid,fsgid;
         struct group_info *group_info;
@@ -335,19 +335,19 @@ Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
         - access with [gs]et_task_comm (which lock
         it with task_lock())
         - initialized normally by flush_old_exec */
-/* file system info */
+    /* file system info */
         int link_count, total_link_count;
-/* ipc stuff */
+    /* ipc stuff */
         struct sysv_sem sysvsem;
-/* CPU-specific state of this task */
+    /* CPU-specific state of this task */
         struct thread_struct thread;
-/* filesystem information */
+    /* filesystem information */
         struct fs_struct *fs;
-/* open file information */
+    /* open file information */
         struct files_struct *files;
-/* namespace */
+    /* namespace */
         struct nsproxy *nsproxy;
-/* signal handlers */
+    /* signal handlers */
         struct signal_struct *signal;
         struct sighand_struct *sighand;
         sigset_t blocked, real_blocked;
@@ -358,15 +358,15 @@ Figure2-2는 몇개의 프로세스 상태와 변이를 보여준다.
         int (*notifier)(void *priv);
         void *notifier_data;
         sigset_t *notifier_mask;
-#ifdef CONFIG_SECURITY
+    #ifdef CONFIG_SECURITY
         void *security;
-#endif
-/* Thread group tracking */
+    #endif
+    /* Thread group tracking */
         u32 parent_exec_id;
         u32 self_exec_id;
-/* journalling filesystem info */
+    /* journalling filesystem info */
         void *journal_info;
-/* VM state */
+    /* VM state */
         struct reclaim_state *reclaim_state;
         struct backing_dev_info *backing_dev_info;
         struct io_context *io_context;
@@ -404,7 +404,53 @@ state는 하나의 프로세스의 현재 상태를 특화하고 다음 값들�
 변수들이다):
 
    - TASK_RUNNING 는 태스크가 실행중에 있다는것을 의미한다. 이것은 CPU가 실제로 할당되었다는 것을 의미하지 않는다.
-     태스크는 
+     태스크는 스케줄러에 의해 선택되어질때까지 대기할 수 있다. 이러한 상태는 그 프로세스가 실제로 실행하기 위해
+     준비되어 있고 다른 외부 이벤트를 위해 기다리고 있지 않다는것을 확신시켜준다.
+
+
+   - TASK_INTERRUPTIBLE은 어떤 이벤트나 다른것을 위해서 대기하고 있는 잠자는 프로세스의 세트이다. 커널이 이벤트가 발생된
+     프로세스에 신호를 보낼때, 그것은 스케줄러가에 의해서 선택되어지는 순간 실행을 재시작할 지도 모르는 TASK_RUNNING 상태에
+     위치하게 된다.
+
+   - TASK_UNINTERRUPTIBLE은 커널 명령을 할수 없는 잠자는 프로세스를 위해서 사용되어진다. 그것들은 커널 자체에 의해서만
+     동작되고 외부 신호에 의해서는 동작하지 않을 수 있다.
+
+   - TASK_STOPPED는 그 프로세스가 ,예를 들면 디버거에 의해서, 의도적으로 멈춰졌다는것을 표시한다.
+
+   - TASK_TRACED는 그 자체로는 프로세스 상태는 아니다.- 정상적으로 멈춘 태스크로부터 현재 트레이스 되어질 수 있는
+     멈춰진 태스크를 구별하기 위해서 사용되어진다.
+
+다음의 변수들은  struct task_struct의 태스크 상태분야뿐 아니라 exit_state에 사용되어진다,특히 현존하는 프로세스들에
+사용되어진다.
+
+   - EXIT_ZOMBIE 는 위에서 언급한 좀비 상태이다.
+
+   - EXIT_DEAD 는 적당한 wait 시스템 콜이 생성된후에 그리고 태스크가 완전히 시스템으로부터 제거되기 전까지의 상태이다.
+     이러한 상태는 다중 트레드가  동일 태스크를 위해서 wait 콜을 생성할때 중요하다.
+
+
+리눅스는 프로세스들에 어떤 시스템 리소스 사용 한계치를 표기하기 위하여 resource limit(rlimit) 메카니즘을 제공한다.
+이러한 메카니즘은 그 요소가 struct rlimit 타입인 task_struct에서 rlim 어레이를 사용한다.
+
+
+.. code-block:: console
+
+    <resource.h>
+        struct rlimit {
+        unsigned long rlim_cur;
+        unsigned long rlim_max;
+        }
+
+정의는 의도적으로 다른 리소스 타입을 수용할 수 있게 일반적이다.
+
+
+   - rlim_cur 는 그 프로세스의 현재 리소스 한계이다.이것은 soft limit로도 간주된다.
+   - rlim_max  그 제한에 대한 최대 허용값이다. 이것은 hard limit로도 간주된다.
+
+setrlimit 시스템 콜은 현재 한계를 증가하거나 감소시키는데 사용된다. 어쨌든, rlim_max에 명기된 값은 넘어가지 않을 수 있다.
+getrlimits는 현재 한계를 체크하는데 사용되어진다.
+
+
 
 
 Process Types
