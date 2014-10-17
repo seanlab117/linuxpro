@@ -644,9 +644,134 @@ Figure2-4 이러한 상황을 보여준다.
         struct net *net_ns;
         };
 
- 
+
+현재 커널의 다음 영역은 네임스페이스를 인식하고 있다.
+
+   - UTS 네임스페이스는 동작하고 있는 커널의 이름과 그 버젼,그리고 잠재하고 있는 아키텍처 타입을  포함하고 있다.
+     UTS 는 Unix Timesharing System의 약자이다.
+
+   - IPC에 관련된 정보는 struct ipc_namespace에 저장된다.
 
 
+   - 마운트된 파일시스템을 보려면 struct mnt_namespace에 있다.
+   - struct pid_namespace는 프로세스 식별자에 관한 정보를 제공한다.
+
+   - struct user_namespace는 개별적 사용자들에게 제한된 리소스 사용을 허락하는 유저단위 정보를 갖는데 필요로 한다.
+   - struct net_ns는 모든 네트웍 관련된 네임스페이스 변수를들 포함한다. 거기에는 어쨌든 이러한 영역을 12장에서 보게될
+     네임스페이들을 완전히 인식시키기 위해서 많은 노력이 필요하다.
+
+나는 관련된 하위 시스템을 논할때 개별 네임스페이스 컨테이너의 컨텐츠를 소개하고자 한다. 이장에서, 우리는 UTS 와 네임스페이스
+에 관심을 갖게 될것이다. fork는 새로운 태스크가 생성될때 새로운 네임스페이스를 열도록 요구되기때문에 , 그러한 행동들을
+컨트롤할 수 있는 적당한 플래그가 제공되어져야 한다.
+하나의 플래그가 개별 네임스페이스를 위해 가능하다.
+
+.. code-block:: console
+
+    <sched.h>
+    #define CLONE_NEWUTS 0x04000000 /* New utsname group? */
+    #define CLONE_NEWIPC 0x08000000 /* New ipcs */
+    #define CLONE_NEWUSER 0x10000000 /* New user namespace */
+    #define CLONE_NEWPID 0x20000000 /* New pid namespace */
+    #define CLONE_NEWNET 0x40000000 /* New network namespace */
+
+ 각 태스크는 자기 자신만의 네임스페이스 뷰와 관련이 있다.
+
+
+.. code-block:: console
+
+    <sched.h>
+    struct task_struct {
+    ...
+    /* namespaces */
+    struct nsproxy *nsproxy;
+    ...
+    }
+
+포인터가 사용되기때문에,하위 네임스페이스의 집합은 다중 프로세스들간에 공유되어질 수 있다. 이러한 방법으로, 주어진
+네임스페이스에 있는 변화들은 이러한 네임스페이스에 속해있는 모든 프로세스에 보여지게 될 것이다.
+
+네임스페이스에 대한 지원은 네임스페이스 단위를 기초로 컴파일 타임에 가능하게 되어져야만 한다. 일반적인 네임스페이스의
+지원은 어쨌든 항상 컴파일에 포함된다. 이것은 커널이 네임스페이스를 가지던 가지지 않던 시스템에서 다른 코드를 사용하지
+못하도록 해준다. 특별히 다르다고 표시하지 않으면 모든 프로세스와 관련이 있는 디폴트 네임스페이스를 제공함으로써,
+네임스페이스를 인식한 코드는 항상 사용되어질 수 있다, 그러나 결과는 모든 특성들이 전체적인 상황과 동일할 것이다. 그리고
+어떤 활성화된 네임스페이스 지원이 컴파일에 포함되지 않으면 네임스페이스로 요약할 수 없다.
+
+초기 전역 네임스페이스는 init_nsproxy로 정의되어 진다,그것은 초기의 단위시스템 네임스페이스의 오브제트들에 대한 포인터들을
+유지한다.
+
+.. code-block:: console
+
+    <kernel/nsproxy.c>
+    struct nsproxy init_nsproxy = INIT_NSPROXY(init_nsproxy);
+    <init_task.h>
+    #define INIT_NSPROXY(nsproxy) { \
+    .pid_ns = &init_pid_ns, \
+    .count = ATOMIC_INIT(1), \
+    .uts_ns = &init_uts_ns, \
+    .mnt_ns = NULL, \
+    INIT_NET_NS(net_ns) \
+    INIT_IPC_NS(ipc_ns) \
+    .user_ns = &init_user_ns, \
+    }
+
+The UTS Namespace
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+UTS 네임스페이스는 이것이 단순한 양을 다루고 구조적인 조직을 필요로 하지 않기때문에 특별한 노력없이 다룰 수 있다.
+모든 관련 정보는 다음 구조의 인스턴스에 모아진다.
+
+.. code-block:: console
+
+    <utsname.h>
+    struct uts_namespace {
+    struct kref kref;
+    struct new_utsname name;
+    };
+
+
+kref는  커널에서 사용되어지는 struct uts_namespace 인스턴스가 얼마나 많은 곳에 위치해 있는지를 쫓기 위한 임베디드
+참조 변수이다.( 1장에서 참조 카운팅을 다루기 위해 일반적인 프레임웍에 대한 정보를 제공한다는 것을 상기해라)
+적당한 정보는 struct new_utsname 에 포함된다.
+
+.. code-block:: console
+
+
+    <utsname.h>
+    struct new_utsname {
+    char sysname[65];
+    char nodename[65];
+    char release[65];
+    char version[65];
+    char machine[65];
+    char domainname[65];
+    };
+
+개별적 스트링은 시스템 이름,커널 릴리즈,머신 이름,등을 저장한다. 현재 값은 uname 툴을 사용해서 결정지을 수 있다.
+그러나 또한 /proc/sys/kernel/ 로도 볼수 있다.
+
+.. code-block:: console
+
+    wolfgang@meitner> cat /proc/sys/kernel/ostype
+    Linux
+    wolfgang@meitner> cat /proc/sys/kernel/osrelease
+    2.6.24
+
+초기값은 init_uts_ns에 저장된다.
+
+.. code-block:: console
+
+    init/version.c
+    struct uts_namespace init_uts_ns = {
+    ...
+        .name = {
+        .sysname = UTS_SYSNAME,
+        .nodename = UTS_NODENAME,
+        .release = UTS_RELEASE,
+        .version = UTS_VERSION,
+        .machine = UTS_MACHINE,
+        .domainname = UTS_DOMAINNAME,
+        },
+    };
 
 
 
