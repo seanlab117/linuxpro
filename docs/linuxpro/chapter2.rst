@@ -1027,7 +1027,126 @@ pid는 그 태스크가 속해있는 하나의 pid 인스턴스에 대한 포인
 hlist_head는 두번 링크된 해쉬 리스트를 만들기 위해서 사용되어지는 커널의 표준 데이터 엘리먼트이다.
 (Appendix C는 그러한 리스트 구조를 설명하고 그것들을 프로세싱하기 위한 부수적인 함수들을 소개한다)
 
-pid_hash는 hist_heads의 어레이로서 사용된다. 엘리먼트의 숫자는 
+pid_hash는 hist_heads의 어레이로서 사용된다. 엘리먼트의 숫자는 머신의 RAM 설정에 의해서 결정되고 2^4=16 과 2^12=4,096
+사이에 놓여있다. pidhash_init은 apt 사이즈를 계산하고 필요한 저장공간을 할당한다.
+
+struct pid 의 새로운 인스턴스가 할당되고 주어진 ID 타입인 type으로 셋업한다고 가정하자. 다음과 같은 태스크 구조에
+추가된다.
+
+.. code-block:: console
+
+    kernel/pid.c
+        int fastcall attach_pid(struct task_struct *task, enum pid_type type,
+        struct pid *pid)
+        {
+        struct pid_link *link;
+        link = &task->pids[type];
+        link->pid = pid;
+        hlist_add_head_rcu(&link->node, &pid->tasks[type]);
+        return 0;
+        }
+
+하나의 연결은 두가지 방향으로 만들어진다: 태스크 구조는 task_struct->pids[type]->pid 를 통해서 pid 인스턴스에 접근할 수
+있다.  pid 인스턴스를 시작으로, 태스크는  tasks[type] 리스트를 반복함으로써 발견되어질 수 있다. hlist_add_rcu 는
+다른 커널 컴포넌트가 그 리스트를 동시에 복제할때 발생할 수 있는 경주상황에 대한 반복이 안전하게 되는 RCU 메카니즘( 5장을 보라)
+단위당 부수적으로 확신할 수 있는 리스트를 가로지르는 표준함수이다.
+
+Functions
+
+커널은 위에서 언급한 데이터 구조를 복제하고 스캔하는 수 많은 보조적인 함수들을 제공한다.기본적으로 커널은 두가지 태스크를
+채울 수 있어야 한다.
+
+   1. 지역 숫자 ID와  그에 상응하는 네임스페이스가 주어지면, 이러한 투풀로 언급되어진 태스크 구조를 발견하라.
+
+   2. 태스크 구조가 주어지면, ID 타입과 네임스페이스는 지역 숫자 ID를 얻는다.
+
+task_struct 인스턴스가 숫자의 ID로 변환되어져야 하는 상황을 일단 집중해 보자. 여기에는 2가지 스텝 프로세스가 있다:
+
+   1.  task 구조와 연관있는 pid 인스턴스를 얻자. 임의의 함수 task_pid,task_tgid,task_pgrp,task_session은 다른 타입의
+       ID를 위해서 제공되어진다. 이것은 PID에게 있어서는 단순하다.
+
+.. code-block:: console
+
+    <sched.h>
+        static inline struct pid *task_pid(struct task_struct *task)
+        {
+        return task->pids[PIDTYPE_PID].pid;
+        }
+.
+
+        TGID를 얻는것은 트레드 그룹 리더의 PID보다 다르지 않기때문에 똑같이 동작한다. 붙잡을려고 하는 엘리먼트는
+        task->group_leader_pids[PIDTYPE_PID].pid 이다.
+
+        프로세스 그룹 ID를 찾는것은 어레이 인덱스로서 PIDTYPE_PGID를 사용하는것이 필요하다. 어쨌든, 그것은 프로세스 그룹 리더의
+        pid 인스턴스로부터 또다시 취해져야만 한다.
+
+.. code-block:: console
+
+    <sched.h>
+        static inline struct pid *task_pgrp(struct task_struct *task)
+        {
+        return task->group_leader->pids[PIDTYPE_PGID].pid;
+        }
+
+.
+
+
+   2. 일단 pid 인스턴스가 가능하다면, 숫자의 ID는  struct pid 에 있는 numbers 어레이에서 가능한 uid 정보를 읽혀질 수 있다
+
+.. code-block:: console
+
+    kernel/pid.c
+        pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
+        {
+        struct upid *upid;
+        pid_t nr = 0;
+        if (pid && ns->level <= pid->level) {
+        upid = &pid->numbers[ns->level];
+        if (upid->ns == ns)
+        nr = upid->nr;
+        }
+        return nr;
+        }
+.
+      부모으 네임스페이스는 자식 네임스페이스에서 PID를 볼 수 있기때문에 , 그러나 반대로는 안된다, 커널은 현재의 네임스페이스
+      레벨이 지역 PID가 생성되는 레벨과 좀 낮거나 같아야함을 확인시켜야 한다.
+      이것은 또한 커널이 전역 PID만에 관심을 가지는 것이 필요하다는것을 나타내는 중요한 것이다: 전역 네임스페이스에 있는
+      모든 다른 ID 타입은 PID에 맵핑될것이다, 그래서 전역 TGID 또는 SID를 생성할 필요가 없다.
+
+두번째 스텝에 있는 pid_nr_ns를 사용하는 대신에, 커널은 이러한 부수적인 함수들중에 하나를 채택해야 한다.
+
+   -  pid_vnr 은 그 ID가 속해 있는 네임스페이스로부터 보여지는 지역 PID를 반환한다.
+   -  pid_nr 은 init 프로세스에서 보여지는대로 전역 PID를 얻는다.
+
+둘다 pid_nr_ns에 의존적이고 자동적으로 전역 PID로서 적당한 level:0 를 선택한다,그리고 지역적인것으로 pid->level을 선택한다.
+
+커널은 언급한 스텝과 연관지어서 몇개의 도움 함수를 제공한다.
+
+.. code-block:: console
+
+    kernel/pid.c
+        pid_t task_pid_nr_ns(struct task_struct *tsk, struct pid_namespace *ns)
+        pid_t task_tgid_nr_ns(struct task_struct *tsk, struct pid_namespace *ns)
+        pid_t task_pgrp_nr_ns(struct task_struct *tsk, struct pid_namespace *ns)
+        pid_t task_session_nr_ns(struct task_struct *tsk, struct pid_namespace *ns)
+.
+
+그들의 의미는 함수 이름으로부터 확실히 알수 있다, 그래서 우리는 좀더 추가할 필요가 없다.
+
+이제 커널이 어떻게 네임스페이스를 가진  숫자의 PID 를 pid 인스턴스로 변환하는지에 관심을 가져보자.  또다시 2개 스텝이
+필요하다.
+
+   1. 하나의 프로세스의 지역 숫자의 PID 와 관련 네임스페이스(PID의 유저스페이스의 표현)가 주어진 pid 인스턴스( PID 의 내부
+      커널 표현)를 결정하기 위하여, 커널은 표준 해쉬 스키마를 채용해야한다: 첫째,pid_hash에 있는 어레이 인덱스는 PID와
+      네임스페이스 포인터들로부터 계산되어진다, 그리고 그 해쉬 리스트는 원하는 엘리먼트가 발견될때까지 기다린다.
+
+      kernel/pid.c
+      struct pid * fastcall find_pid_ns(int nr, struct pid_namespace *ns)
+
+      struct upid의 인스턴스들은 해쉬에 유지된다, 그러나 이런것들은 struct pid에 직접적으로 포함되기때문에, 커널은
+      container_of 메카니즘이라는 것을 사용해서 원하는 정보를 얻는다.( Appendix C를 보라)
+
+   2. pid_task는 리스트 pid->tasks[type]에서 대기중인 첫번째 task_struct 인스턴스를 해제한다.
 
 
 
