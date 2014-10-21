@@ -870,8 +870,164 @@ Process Identifiers
    - Global ID는 커널 자체에 그리고 init 태스크가 부팅시간동안 시작되는 초기 네임스페이스에서만 있을때 가치가 있는 식별
      숫자이다.
 
-   - Local ID는 특별한 네임스페이스에 속해있고 전체적으로 의미가 있지는 않다. 각 ID
+   - Local ID는 특별한 네임스페이스에 속해있고 전체적으로 의미가 있지는 않다. 각 ID 타입은, 그것들이 속해 있는 네임스페이스
+     안에서 유효하다. 그러나 인식 타입의 식별자는 다른 네임스페이스의 동일 ID 숫자로 나타날지 모르겠다.
 
+전역 PID 와 TGID는 태스크 구조체에 직접 저장이 된다, 말하자면, pid 엘리먼트와  tgid 엘리먼트로:
+
+.. code-block:: console
+
+    <sched.h>
+        struct task_struct {
+        ...
+        pid_t pid;
+        pid_t tgid;
+        ...
+        }
+
+
+둘다 __kernel_pid_t에 녹아 있는 pid_t 타입이다: 이것은,교대로, 각각 아키텍처로 정의되어야만 한다. 보통 int가 사용된다면,
+그것은 2 ^32  다른 ID가 동시에 사용될 수 있다는 것을 의미한다.
+
+세션과 프로세스 그룹 ID는 직접적으로 태스크 구조 자체에 포함되지 않고 신호 핸들링에 사용되는 구조체에 포함된다.
+task_struct->signal->__session은 전역 SID를 의미한다, 반면 전역 PGID는 task_struct->signal->__pgrp에 저장된다.
+보조적인 함수인 set_task_session 과 set_task_pgrp는 그 값을 변경하는데 제공된다.
+
+Managing PIDs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+이러한 두개의 필드에 추가하여, 커널은 모든 지역 단위네임스페이스 양뿐만 아니라 TID와 SID 같은 다른 구별자를 관리하는
+방법을  찾는것이 필요하다.  이것은 몇개의 상호 연결된 데이터 구조가 필요로 하고 다음장에서 이야기할 수 많은 임의 함수들이
+필요로 한다.
+
+Data Structures
+
+아래에 나는 임의의 프로세스 식별자를 업급하기 위하여 ID라는 것을 사용할 것이다.나는 이것이 필요로 하는곳에식별자 타입을
+명확하게 구분하였다.(예를들면 TGID for "트레드 그룹 식별자")
+
+pid 할당자라고 알려진 작은 하위 시스템은 새로운 ID  할당에 속도를 내는데 가능하다. 부수적으로, 커널은 ID 와 그 타입 참조로
+하나의 프로세스의 태스크 구조를 발견하는 데 하락하도록 하는 임의의 함수와 ID의 커널 내재 표현과 유저 스페이스에 보여지는
+수많은 값들 사이의 변환 함수들을 제공하는 데 필요할 것이다.
+
+나는 ID들 자체를 표현하는 데이터 구조를 소개하기전에, 나는 어떻게 PID 네임스페이스가 표현되는지 논의할 필요가 있다.
+우리의 목적에 필요로 하는 요소는 다음과 같다:
+
+.. code-block:: console
+
+    <pid_namespace.h>
+        struct pid_namespace {
+        ...
+        struct task_struct *child_reaper;
+        ...
+        int level;
+        struct pid_namespace *parent;
+        };
+
+실제로, 그 구조는 또한 독특한 ID 스트림을 만들기 위해 PID 할당자에 의해서 필요로 하는 요소를 포함하고 있다. 그러나
+이것들은 지금 우리의  관심은 아니다. 관심있는 것은 다음 요소들이다:
+
+   - 모든 PID 네임스페이스는 전체적인 그림에서 init에 의해서 취해지는 역할을 추정하는 태스크로 갖추어져 있다.
+     init의 목적중에 하나는 고아가 된 태스크들을 위한 wait4를 호출하는 것이다. 그리고 이것은 네임스페이스 특화된
+     init 변수들에 의해 행해져야 한다.  이러한 태스크의 태스트 구조에 대한 포인터는 child_reaper에 저장된다.
+
+   - 부모는 부모의 네임스페이스에 대한 포인터이다, 그리고 level은 네임스페이스 구조에 깊이를 나타낸다. 초기 네임스페이스는
+     레벨 0를 가진다, 이러한 네임스페이스의 자식은 레벨 1에 있다, 자식의 자식은 레벨 2에 있다. 레벨을 계산하는 것은
+     높은 레벨에 있는 ID들은 하위 레벨에서도 보여야만 하기때문에 중요하다. 주어진 레벨 셋팅으로부터 , 커널은 얼마나 많은
+     ID들이 태스크와 연관이 있어야만 하는지 추론할 수 있다.
+
+네임스페이스는 구조적으로 관련이 있다는 것을 Figure2-3으로부터 상기하자. 이것은 상기 정의를 정리해준다.
+
+PID 관리는 두개의 데이터 구조 주변에 집중해 있다: struct pid는 PID의 커널 내부적인 표현이다, 그리고 struct upid는
+특별한 네임스페이스에 보여질 수 있는 정보를 표현한다. 두 구조의 정의는 아래와 같다:
+
+.. code-block:: console
+
+    <pid.h>
+        struct upid {
+        int nr;
+        struct pid_namespace *ns;
+        struct hlist_node pid_chain;
+        };
+        struct pid
+        {
+        atomic_t count;
+        /* lists of tasks that use this pid */
+        struct hlist_head tasks[PIDTYPE_MAX];
+        int level;
+        struct upid numbers[1];
+        };
+
+이러한 것들과 다른 데이터 구조들은 철처히 상호 연결되어있다 ,Figure 2-5는 내가 그 개별적인 컴포넌트를 논하기전에
+그 상황에 대한 오버뷰를 제공한다.
+struct upid로서는,nr 은 ID의 숫자값을 표현한다.ns는 그 값이 소유하고 있는 네임스페이스에 대한 포인터이다.
+모든 upid 인스턴스는 순간적으로 발생하게 되는 해쉬 테이블에 유지된다. pid_chain은  커널의 표준 방법으로 해쉬 오버플로우
+리스트를 구현하도록 허락한다.
+
+struct pid의 정의는 참조 카운터인 count에 의해 처음부터 시작된다. tasks는 모든 ID 타입의 머리말을 표현하는 해쉬 리스트를
+갖는 어레이이다. 이것은 하나의 ID가 여러개의 프로세스들을 위해서 사용되기때문에 필요하다. 주어진 ID를 공유하는 모든
+task_struct 인스턴스는 이러한 리스트에 링크되어 있다. PIDTYPE_MAX ID 타입의 숫자를 표기한다.
+
+
+.. code-block:: console
+
+    <pid.h>
+        enum pid_type
+        {
+        PIDTYPE_PID,
+        PIDTYPE_PGID,
+        PIDTYPE_SID,
+        PIDTYPE_MAX
+        };
+
+.. image:: ./img/fig2_5.png
+
+트레트 그룹 ID는 이러한 집합에 포함되지 않았다는 것을 명심하라. 이것은 트레드 그룹 ID는 트레드 그룹의 PID에 의해
+주어지기때문이다. 그래서 별도의 등장은 필요하지 않다.
+
+프로세스는 다중 네임스페이스에 보여질 수 있다. 각 네임스페이스에 있는 지역 ID는 다를것이다. level은  그 프로세스가
+얼마나 많은 네임스페이스에서 볼수 있는가를 표시한다.(다른말로, 이것은 네임스페이스 구조체에서 네임스페이스를 포함하는
+깊이이다), 그리고 numbers는 각 레벨을 위한 upid 인스턴스를 포함한다. 그 어레이는 형식상 하나의 엘리먼트로 구성된다는 것을
+명심해라, 그리고 이것은 하나의 프로세스가 전역 네임스페이스에서 유일하게 포함된다면 맞는것이다. 그 엘리먼트는  그 구조의
+마지막에 있기때문에,부수적인 등장들이 간단히 좀더 공간을 할당함으로써 어레이에 추가가 될 수 있다.
+
+하나의 식별자를 공유하는 모든 태스크 구조들은 task 라는 머릿말로 시작되는 리스트에 유지되기때문에, 리스트 엘리먼트는
+struct task_struct에서 필요로 한다.
+
+
+.. code-block:: console
+
+    <sched.h>
+        struct task_struct {
+        ...
+        /* PID/PID hash table linkage. */
+        struct pid_link pids[PIDTYPE_MAX];
+        ...
+        };
+
+부수적인 데이터 구조인 pid_link 는  struct pid 라고 머릿말을 가진 리스트에 태스크 구조의 링크를 허락한다.
+
+
+.. code-block:: console
+
+    <pid.h>
+        struct pid_link
+        {
+        struct hlist_node node;
+        struct pid *pid;
+        };
+
+pid는 그 태스크가 속해있는 하나의 pid 인스턴스에 대한 포인터를 가리킨다, 그리고 node는 리스트 엘리먼트로 사용된다.
+해시테이블은  주어진 네임스페이스에 숫자로 된 PID값에 속해 있는 pid 인스턴스를 발견하는데 사용된다:
+
+.. code-block:: console
+
+    kernel/pid.c
+    static struct hlist_head *pid_hash;
+
+hlist_head는 두번 링크된 해쉬 리스트를 만들기 위해서 사용되어지는 커널의 표준 데이터 엘리먼트이다.
+(Appendix C는 그러한 리스트 구조를 설명하고 그것들을 프로세싱하기 위한 부수적인 함수들을 소개한다)
+
+pid_hash는 hist_heads의 어레이로서 사용된다. 엘리먼트의 숫자는 
 
 
 
