@@ -1506,8 +1506,61 @@ do_fork 에서 작업의 많은 부분이 copy_process 함수에 의해서 행�
      신호에 의해서 주소값되어질 수 없다.
 
    - 공유된 신호 핸들러는 가상 주소 공간이 부모와 자식(CLONE_VM)간에 공유되어진다면 유일하게 제공되어질 수 있다.
+     타의적인 생각은 트레는 따라서 부모와 주소 공간을 공유해야만 한다는 것을 표출한다.
 
+일단 커널이 플래그 셋이 자체로서 반박되지 않도록 성립된다면, dup_task_struct 는 부모 프로세스의 태스크 구조의 동일한
+복사본을 생성하는데 사용된다. 새로운 자식의 task_struct 인스턴스는 해제가 발생되는 커널의 메모리의 어떤 지점에 할당 될
+수 있다.( 3장을 보면, 그곳에 이런 목적으로 사용된 할당 메카니즘이 설명되어 있다).
 
+부모와 자식의 태스크 구조는 하나의 엘리먼트로서 유일하게 다르다: 새로운 커널모드 스택은 새로운 프로세스로서 할당된다.
+그것에 대한 하나의 포인터로서 task_struct->stack 에 저장된다. 보통은 스택은 thread_info를 가진 유니온에 저장된다.
+그것은 트레드에 관련된 모든 필요로 하는 프로세서 특화된 하위 레벨을 대한 정보를 쥐고 있다.
+
+    <sched.h>
+        union thread_union {
+        struct thread_info thread_info;
+        unsigned long stack[THREAD_SIZE/sizeof(long)];
+        };
+
+원론적으로, 개별적 아키텍처는 어쨌든 그들이 프리 프로세서 변수 __HAVE_THREAD_FUNCTIONS 을 셋팅함으로써 커널에게 신호를
+준다면 stack 포인터에서 그들이 좋아하는 무엇이든 저장하는건 자유이다.
+이런경우에, 그들은 task_thread_info와 task_stack_page 의 그들 자신만의 구현을 제공해야만 한다. 이것은 트레드 정보와
+주어진 task_struct 인스턴스를 위한 커널 모드 스택을 얻는것을 허락한다. 부수적으로, 그들은 stack에 대한 종착점을 만들기
+위해 dup_task_struct에서 호출된 setup_thread_stack 함수를 구현해야만 한다.  현재 IA-64 와 m68k 은 커널의 기본 방법에
+의존하지 않는다.
+
+대부분의 아키텍처들에서, 하나 또는 두개의 메모리 페이지가 thread_union 인스턴스를 쥐기 위하여 사용된다. IA-32의 경우에는
+두개의 페이지가 기본 셋팅이다, 그래서 가용한 커널 스택 사이즈는  부분이 thread_info 인스턴스에 의해서 점유되어지기때문에
+8 KiB보다는 약간 작다. 설정옵션인 4KSTACKS 는 4 KiB까지 스택 사이즈가 줄어들고 하나의 페이지로 됨을 명심하라. 이것은
+프로세스당 하나의 페이지가 저장되기때문에 많은 수의 프로세스들이 그 시스템에서 동작되기만 하면 잇점이 있다.
+반대로, "stack hogs"로 되는 경향이 있는, 예를들면, 많은 스택 공간을 사용하는, 외부 드라이버와 문제점을 야기시킬 수 있다.
+표준 배포의 일부인 커널의 모든 중앙부는 4KiB 스택 사이즈와 아주 유연하게 동작되도록 디자인 되어 있다, 그러나 바이너리
+만의 드라이버가 필요로 한다면 문제는 일어날 수 있다( 그리고 불행하게도 과거에 가졌다),그것은 종종 가용 스택 공간을 잡동사니
+로 채우는 경향이 있다.
+
+thread_info는 아키텍처 특화된 어셈블리 코드에 의해서 접근되어질 필요가 있는 프로세스 데이터를 쥐고 있다. 구조가 프로세서마다
+다르게 정의되어 있을지라도, 그 컨텐츠는 대부분의 시스템에서 다음과 같이 유사하다.
+
+    <asm-arch/thread_info.h>
+        struct thread_info {
+                struct task_struct *task; /* main task structure */
+                struct exec_domain *exec_domain; /* execution domain */
+                unsigned long flags; /* low level flags */
+                unsigned long status; /* thread-synchronous flags */
+                __u32 cpu; /* current CPU */
+                int preempt_count; /* 0 => preemptable, <0 => BUG */
+                mm_segment_t addr_limit; /* thread address space */
+                struct restart_block restart_block;
+        }
+
+   - 태스크는 프로세스의 task_struct 인스턴스에 대한 포인터이다.
+   - exec_domain은  하나의 머신 타입에서 다른 ABIs(Application Binary Interface) 가 구현될 수 있는 execution domains 을
+     구현하는데 사용된다.(예를들면 64bit모드에 있는 AMD64 시스템에 32bit 어플리케이션을 구동하는것)
+
+   - flags는 다양한 프로세스 특화된 플래그를 가질 수 있다, 그것들중에 2개는 특히 우리에게 관심이 있다:
+
+     * TIF_SIGPENDING 은 프로세스가 펜딩 시그널을 가질때만 셋된다.
+     * TIF_NEED_RESCHED는 
 
 
 
