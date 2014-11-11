@@ -1675,25 +1675,151 @@ CLONE_ABC가 셋팅되지 않으면, res_abc의 복사는 자식 프로세스를
 
    - copy_namespace는 특별한 콜 의미론을 가진다. 그것은 자식 프로세스를 위한 네임스페이스를 셋업하는데 사용된다.
      몇개의 CLONE_NEWxyz 플래그가 그 네임스페이스가 부모와 공유되는 자식 프로세스를 컨트롤한다는 것을 상기하라.
-     
+     어쨌든, 그 의미론은 모든 다른 플래그에 반대가 된다: CLONE_NEWxyz 이 특화가 되지 않으면, 특화된 네임스페이스는 부모와
+     공유를 한다.그렇지 않으면, 새로운 네임스페이스가 생성된다. copy_namespace는 각자 가능한 네임스페이스의 복사 과정을
+     생성하는 디스패처이다. 개별적 복사 루틴은,어쨌든,그것들이 기본적으로 데이터를 복사하거나 참조 카운터 관리의 수단으로
+     공유되어지는 이미 존재하는 인스턴스를 만들기때문에 그렇게 중요하지는 않다,그래서 나는 상세한 구현을 다루지 않을 것이다.
+
+   - copy_thread 는 이곳에서 설명한 모든 다른 copy 동작들과 비교해서- 프로세스의 트레드 특화된 데이터를 복사하는 아키텍처
+     특화된 함수이다.
+
+.. code-block:: console
+
+    트레트 특화됐다라는 용어는 ClONE 플래그나 동작이 단지 트레드만을 위해서이고 모든 프로세스를 위해서가 아니라는 사실에
+    참조되지 않는다.그것은 단지 아키텍처 특화된 실행 컨텍스트에 기여하는 모든 데이터가 복사된다는 의미이다( 트레드라는
+    말은 커널에서 한가지 이상의 의미가 있다)
+
+...
+
+    중요한 것은 task_struct->thread 엘리먼트를 채우는 것이다. 이것은 그 정의가 아키텍처 의존적인  thread_struct type의
+    구조이다. 그것은 태스크간 저급 스위칭을 하는 동안 프로세스의  컨텐츠를 저장하고 복원하기 위하여 커널에서 필요로 하는
+    모든 레지스터를 가지고 있다.
+    다양한 CPU들에 대한 친숙한 지식은 개별적 thread_struct 구조의 레이아웃을 이해하는게 필요로 한다는 것이다. 이러한 구조에
+    대한 모든 설명은 이책의 범위를 벗어난다. 어쨌든, Appendix A 는 몇개의 시스템에 대한 구조의 컨텐츠에 대한 정보를 포함한다.
+
+copy_process로 돌아가서, 커널은 부모와 자식간에 틀린 다양한 태스크 구조의 요소들로 채워져야만 한다. 이것들은 다음을 포함한다
+
+   - task_struct에 포함된 다양한 리스트 엘리먼트들, 예를 들면 sibling 또는 children
+   - 인터벌 타이머 엘리먼트 cpu_timers( 15장을 보라)
+   - 15장에서 다루게 될 펜딩 시스널의 리스트
+
+이전에 설명했던 메카니즘을 가지고 태스크에 대한 새로운 pid 인스턴스를 할당한후에, 그것들은 태스크 구조에 저장된다.
+트레드를 위해서는, 트레드 그룹 ID는 포킹 프로세스의 그것과 동일하다.
+
+    kernel/fork.c
+        p->pid = pid_nr(pid);
+        p->tgid = p->pid;
+        if (clone_flags & CLONE_THREAD)
+        p->tgid = current->tgid;
+        ...
+
+pid_nr 은 주어진 pid 인스턴스의 전역 변수 PID를 계산한다는 것을 상기하라.
+보통의 프로세스들은,부모 프로세스는 포킹 프로세스이다. 이것은 트레드와의 차이점이다: 그것들은 생성된 프로세스 안에서
+두번째 실행 라인으로서 보여지기때문에, 그들의 부모는 부모의 부모이다. 이것은 말보다는 코드가 쉽다:
+
+    kernel/fork.c
+        if (clone_flags & (CLONE_PARENT|CLONE_THREAD))
+        p->real_parent = current->real_parent;
+        else
+        p->real_parent = current;
+        p->parent = p->real_parent;
+
+트레드가 아닌 보통으 프로세스들은 CLONE_PARENT를 셋팅함으로써 동일한 행동을 불러 일으킬 수 있다. 또다른 조치는
+트레드를 위해 필요하다: 보통의 프로세스 트레드 그룹 리더는 프로세스 그 자체이다. 트레드로서, 그룹 리더는 현재 프로세스의
+그룹 리더이다.
+
+    kernel/fork.c
+        add_parent(p);
+        if (thread_group_leader(p)) {
+        if (clone_flags & CLONE_NEWPID)
+        p->nsproxy->pid_ns->child_reaper = p;
+        set_task_pgrp(p, task_pgrp_nr(current));
+        set_task_session(p, task_session_nr(current));
+        attach_pid(p, PIDTYPE_PGID, task_pgrp(current));
+        attach_pid(p, PIDTYPE_SID, task_session(current));
+        }
+        attach_pid(p, PIDTYPE_PID, pid);
+        ...
+        return p;
+        }
+
+thread_group_leader 는 단지 새로운 프로세스의 pid와 tgid가 동일한지에 대해서만 체크한다. 그렇다면, 그 프로세스는 트레드
+그룹의 리더이다. 이런 경우,어떤 조금의 작업이 필요하다:
+
+   - 글로벌 네임스페이스가 아닌 프로세스 네임스페이스에서 프로세스들은 그들만의 init 태스크를 가진다. 새로운 PID 네임스페이스
+     가 CLONE_NEWPID를 셋팅함으로호 열린다면, 이런 역할은 clone으로 불리는 태스크에 의해서 추정되어져야만 한다.
+
+   - 새로운 프로세스가 현재 태스크 그룹과 세션에 추가되어져야 한다. 이것은 좋은 용도로 위에서 언급한 함수들의 몇개를
+     도출하도록 허락한다.
+
+마지막으로 PID 자체는 ID 네트웍에 추가된다. 이것은 새로운 프로세스의 생성을 초래한다.
+
+Special Points When Generating Threads
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+유저스페이스 트레드 라이브러리는 새로운 트레드를 생성하기 위하여 clone 시스템 콜을 사용한다. 이 콜은 copy_process에서
+특별한 효과를 생산하는 플래그를 지원한다. 단순함을 위해서, 나는 이러한 플래그들을 생략했다. 어쨌든, 리눅스 커널에서
+전통적인 프로세스와 트레드간의 차이점은 상대적으로 유동적이고 두개의 용어는 종종 동의러로 사용된다는 것을 명심하라
+(트레드는 위에서 얘기한대로 프로세스의 아키텍처 의존적인 부분을 의미하는데 종종 쓰인다). 이장에서, 멀티 트레드 기능을
+구현하기 위하여 유저 트레드 라이브러리들에 의해서 사용되어지는 플래그들에 집중했다.
+
+   - CLONE_PARENT_SETTID는 clone 콜에서 특화된 유저스페이스에서의 포인터로 생성된 트레드의 PID를 복사한다.
+
+     kernel/fork.c
+            if (clone_flags & CLONE_PARENT_SETTID)
+            put_user(nr, parent_tidptr);
+
+     복사 동작은 새로운 트레드의 태스크 구조가 초기화되기전까지 그리고 그 데이터가 복사 동작으로 생성되기전까지 do_work에서
+     실행된다.
+
+   - CLONE_CHILD_SETTID는 새로운 프로세스의 태스크 구조에 저장되는 clone에 전달되는 좀더 심화있는 유저스페이스 포인터를
+     발생한다.
+
+     kernel/fork.c
+            p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? child_tidptr : NULL;
+
+     새로운 프로세스가 처음으로 실행되었을때 호출되는 schedule_tail 함수는 현재 PID를 이 주소값에 복사한다.
+
+     kernel/schedule.c
+            asmlinkage void schedule_tail(struct task_struct *prev)
+            {
+            ...
+            if (current->set_child_tid)
+            put_user(task_pid_vnr(current), current->set_child_tid);
+            ...
+            }
 
 
+   - CLONE_CHILD_CLEARTID는 유저스페이스 포인터인 child_tidptr이 태스크 구조에 저장되는 copy_process에서 초기 효과를 가진다.
+     그러나 여기서는 다른 엘리먼트이다.
+
+     kernel/fork.c
+            p->clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? child_tidptr: NULL;
+
+     그 프로세스가 종료될때,clear_child_tid 에 정의된 주소값에 0가 쓰여진다.
+
+     kernel/fork.c
+            void mm_release(struct task_struct *tsk, struct mm_struct *mm)
+            {
+            if (tsk->clear_child_tid
+            && atomic_read(&mm->mm_users) > 1) {
+            u32 __user * tidptr = tsk->clear_child_tid;
+            tsk->clear_child_tid = NULL;
+            put_user(0, tidptr);
+            sys_futex(tidptr, FUTEX_WAKE, 1, NULL, NULL, 0);
+            }
+            ...
+            }
+     부가적으로,sys_futex,빠른 유저스페이스 뮤텍스는 이러한 이벤트, 말하자면 트레드의 마지막에, 기다리고 있는 프로세스들을
+     깨우는데 사용된다.
+
+상기의 플래그들은 트레드들이 커널에서 생성되고 소멸될때 체크하기 위하여 유저스페이스안에서 사용될 수 있다.
+CLONE_CHILD_SETID 와 CLONE_PARENT_SETID는 트레드가 생성될때 체크하기 위하여 사용된다; CLONE_CHILD_CLEARTID는 커널에서
+유저스페이스로 트레드가 소멸시 정보를 전달하기 위하여 사용된다.
+이러한 체크는 멀티 프로세스 시스템에서 병렬로 수행된다.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-Kerne Threads
+2.4.2 Kerne Threads
 ----------------------------------
 
 
