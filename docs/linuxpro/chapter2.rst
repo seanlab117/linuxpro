@@ -2289,6 +2289,183 @@ Elements in the Task Structure
       때문일것이다. ( 이것은 어떻게 커널이 그들의 우선권을 반영하는 태스크 무게를 계산하는지를 논할때 명료해 질 것이다)
 
 
+   - SCHED_RR 과 SCHED_FIFO 는 소프트 실시간 프로세스들을 구현하기 위하여 사용된다. SCHED_RR은 라운드 로빈 방법을 구현한다.
+     반면, SCHED_FIFO 는 firt in,firt out 방법을 사용한다. 이런것들은 완전히 공정한 스케줄러 클래스에 의해서 다루어 지지
+     않는다, 그러나 실시간 스케줄러 클래스에 의해서 다루어진다, 이것은 섹션 2.7에서 상세하게 다룬다.
+
+     임의의 함수 rt_policy는 주어진 스케줄링 정책이 실시간 클래스에(SCHED_RR 과 SCHED_FIFO) 소유되는지 않되는지를
+     결정하는 데 사용된다. task_rt_policy는 주어진 태스크에 대한 특성등을 고려한다.
+
+    kernel/sched.c
+        static inline int rt_policy(int policy)
+        static inline int task_has_rt_policy(struct task_struct *p)
+   - cpus_allowed는  하나의 프로세스가 실행될수 있는 CPU들을 제한하는 멀티프로세스 시스템에 사용된는 비트필드이다.
+
+   - run_list 와 time_slice는 라운드 로빈 실시간 스케줄러를 위해서 필요하다, 그러나 완전히 공정한 스케줄러를 위해서는
+     아니다. run_list 실행 리스트에서 그 프로세스를 잡고 있는 사용되는 리스트 헤드이다. 반면, time_slice는 그 프로세스가
+     그 CPU를 사용할 동안 남아있는 시간 양자를 표시한다.
+
+위에서 언급한 TIF_NEED_RESCHED 플래그는 특별한 스케줄러 엘리먼트는 태스크 구조에 쥐고 있는만큼 스케줄러에게 있어 중요하다.
+이 플래그가 활성화 프로세스를 위해서 셋되면, 스케줄러는 CPU가 그 프로세스로부터 복귀될것이라는 것을 안다.-자발적이던 또는
+타의적이던- 그리고 새로운 프로세스를 할당한다.
+
+Scheduler Classes
+~~~~~~~~~~~~~~~~~~~~~~
+
+스케줄러 클래스는 일반적인 스케줄러와 개별적 스케줄링 방법간에 연결을 제공한다. 그것들은 특별한 데이터 구조에 모아진
+몇개의 함수 포인터들로 표현이 된다. 글로벌 스케줄러에 의해서 요청되어질 수 있는 각 동작은 하나의 포인터로 표현될 수 있다.
+이것은 다른 스케줄러 클래스의 내부 동작에 관한 어떤 지식 없이도 일반적인 스케줄러 생성을 허락한다.
+
+멀티프로세서 시스템을 위해 필요한 확장성 없이도, (다시 이후에 설명하겠다) , 그 구조는 다음과 같다:
+
+    <sched.h>
+        struct sched_class {
+        const struct sched_class *next;
+        void (*enqueue_task) (struct rq *rq, struct task_struct *p, int wakeup);
+        void (*dequeue_task) (struct rq *rq, struct task_struct *p, int sleep);
+        void (*yield_task) (struct rq *rq);
+        void (*check_preempt_curr) (struct rq *rq, struct task_struct *p);
+        struct task_struct * (*pick_next_task) (struct rq *rq);
+        void (*put_prev_task) (struct rq *rq, struct task_struct *p);
+        void (*set_curr_task) (struct rq *rq);
+        void (*task_tick) (struct rq *rq, struct task_struct *p);
+        void (*task_new) (struct rq *rq, struct task_struct *p);
+        };
+
+struct_sched_class의 인스턴스는 각 스케줄링 클래스를 위해서 제공되어져야 한다. 스케줄링 클래스는 평평한 구조체에 관련이
+있다.: 실시간 프로세스들은 가장 중요하다, 그래서 그들은 완전한 공정 프로세스들 앞전에 다루어지고 그것은 교대로 거기에 더
+좋은 것이 없을때 CPU에 활성화를 주는 아이들 태스크에 선호를 준다. 다음의 엘리먼트는 설명한 순서에서 다른 스케줄링 클래스
+의 sched_class 인스턴스를 연결한다. 이러한 계층은 이미 컴파일 타임에 셋업된다는 것을 명심하라: 거기에는 실행 시간에
+다이나믹하게 새로운 스케줄러 클래스들을 추가하는 메카니즘이 없다.
+
+각 스케줄잉 클래스에 의해서 제공되어질 수 있는 동작은 다음과 같다:
+
+   - enqueue_task 는 실행큐에 새로운 프로세스를 추가해야 한다. 이것은 하나의 프로세스가 슬리핑에서 실행단계로 변경할 때
+     발생한다.
+
+   - dequeue_task는 인버스 동작을 제공한다: 그것은 하나의 프로세스를 실행큐에서 뺀다. 자연적으로, 이것은 하나의 프로세스가
+     실행에서 비실행 단계로 스위칭할때 발생한다, 또는 커널이 다른 이유로 실행큐에서 뺄때 발생한다- 예를들면, 그 우선권이
+     변할 필요가 있기때문이다.
+
+     run queue가 사용될지라도, 개별적 스케줄링 클래스는 단순큐에 그들의 프로세스들을 표현할 필요가 없다. 사실, 완전한
+     공정 스케줄러가 이러한 목적으로 레드-블랙 트리를 사용한다는 것을 다시한번 상기하라.
+
+   - 하나의 프로세스가 그 프로세서의 컨트롤을 자발적으로 포기하고자 할때,그것은 sched_yield 시스템 콜을 사용할 수 있다.
+     이것은 yield_task를 커널에서 호출될 수 있도록 촉발시킨다.
+
+   - check_preempt_curr은  이것이 필요하다면 새롭게 일깨워진 태스크를 가진 현재 태스크를 선점하는데 사용된다.
+     그 함수가 새로운 태스크가 wake_up_new_task로 깨워졌을때 호출된다.
+
+   - pick_next_task는 실행되기를 기다리는 다음 태스크를 선택한다, 반면 put_prev_task는 현재 실행중인 태스크가 다른 것으로
+     교체되긴전에 호출된다. 이러한 동작은 engueue_task나 dequeue_task같은 실행 큐를 태스크로부터 붙이고 떼는 것과는 동일
+     하지 않다. 대신에, 그것들은 하나의 태스크에 할당된 CPU를 멀리 떨어지도록 하는 책임을 가지고 있다. 다른 태스크간에
+     스위칭은 어쨌든 낮은 레벨의 컨텍스트 스위치를 수행함이 필요하다.
+
+   - set_curr_task는 하나의 태스크의 스케줄링 정책이 변경될때 호출된다. 여기에는 또한 그함수를 호출하는 다른 영역이 있따.
+     그러나 그것들은 우리의 목적에는 관련이 없다.
+
+   - task_tick은 그것이 활성화될때마다 주기적 스케줄러에 의해 호출된다.
+   - new_task는 fork 시스템 콜과 스케줄러간에 연결을 셋업하는것을 허락한다. 매 새로운 태스크가 생성될때, 스케줄러는 new_task
+     로 이것에 관해 알려진다.
+
+표준함수인 activate_task 와 deactivate_task는 앞서 언급한 함수들을 호출함으로써 태스크를 큐에 올리고 내리기 위해서 제공
+된다.부수적으로, 그들은 커널 통계를 최신으로 유지한다.
+
+    kernel/sched.c
+        static void enqueue_task(struct rq *rq, struct task_struct *p, int wakeup)
+        static void dequeue_task(struct rq *rq, struct task_struct *p, int sleep)
+
+하나의 프로세스가 실행큐에 등록됐을때, 임베디드된 sched_entity 인스턴스의 on_rq 엘리먼트는 1로 셋되고 , 그렇지 않으면 0으로
+셋된다.
+
+이것들과 더블러, 커널은 주어진 태스크와 관련이 있는 스케줄링 클래스의 check_preempt_curr 방법을 호출하기 위하여 편리한
+방법인 check_preempt_curr를 정의한다.
+
+    kernel/sched.c
+        static inline void check_preempt_curr(struct rq *rq, struct task_struct *p)
+
+유저랜드 어플리케이션은 스케줄링 클래스들과 직접적으로 상호작용을 하지 않는다. 그것들은 단지 변수 SCHED_xyz를 위에서 정의한
+것처럼 알고 있다. 이것은 이러한 변수들과 가용한 스케줄링 클래스들간의 적당한 매핑을 주는 커널의 업무이다. SCHED_NORMAL,
+SCHED_BATCH,SCHED_IDLE은 fair_sched_class에 맵핑되어 있다, 반면 SCHED_RR 과 SCHED_FIFO는 rt_sched_class 와 관련이 있다.
+fair_sched_class 와 rt_sched_class는 각각 완전히 정당하고 실시간 스케줄러를 나타내는 sched_class 의 인스턴스들이다.
+이러한 인스턴스들의 컨텐츠는 각각의 스케줄러 클래스를 상세하게 다룰때 보여지게 될것이다.
+
+Run Queues
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+활성화된 프로세스들을 관리하는데 사용되는 핵심 스케줄러의 가운데 데이터 구조는 run queue로 알려진다. 각 CPU는 각자의
+런큐를 가지고 있다, 그리고 각 활성 프로세드는 단지 하나의 런큐에만 나타난다. 그것은 동시에 몇개의 CPU에서 하나의 프로세스를
+실행하는것이 가능하지 않다.
+
+런큐는 전역 스케줄러의 많은 액션들을 위한 시작점이다. 어쨌든, 프로세스들은 런큐의 일반적 엘리먼트들에 의해서 직접 관리되지
+않음을 주의해라. 이것은 개별적 스케줄러 클래스에 대한 책임을 가지고 있고 클래스 특화된 서브 런큐는 따라서 매 런 큐에
+탑재되어 있다.
+
+런큐는 다음 데이터 구조를 사용함으로써 구현된다. 문제들을 단순화하기 위하여, 나는  런큐 동작에 직접적으로 영향을 주지 않는
+몇개의 통계적 엘리먼트들을 삭제했다. 그리고 그 엘리먼트들을 멀티프로세서 시스템에서 필요로 한것들이다.
+
+    kernel/sched.c
+        struct rq {
+        unsigned long nr_running;
+        #define CPU_LOAD_IDX_MAX 5
+        unsigned long cpu_load[CPU_LOAD_IDX_MAX];
+        ...
+        struct load_weight load;
+        struct cfs_rq cfs;
+        struct rt_rq rt;
+        struct task_struct *curr, *idle;
+        u64 clock;
+        ...
+        };
+
+   - nr_running 규체서 실행가능한 프로세스들의 숫자를 표시한다-그들의 우선권이나 스케줄링 클래스에 상관없이
+   - load는 런큐에서 현재 로드에 대한 측정치를 제공한다. 큐로드는 필수적으로 큐에서 현재 활성화된 프로세스들의 숫자에
+     비례한다, 반면 각 프로세스는 부가적으로 그들의 우선권에 의해 좌지우지 된다. 가상 단위 런큐의 속도는 이러한 정보에
+     기초를 하고 있다. 로드와 다른 관련있는 양을 계산하는것이 스케줄링 알고리즘에서 중요한 컴포넌트이기때문에 , 나는
+     2.5.3 섹션을 포함하고 있는 메카니즘을 상세하게 설명하는데 할애하였다.
+
+   - cpu_load는 load의 행동들을 과거에 이르기까지 추적을 허용한다.
+   - cfs 와 rf는 각각 완전히 공정하고 실시간 스케줄러를 위한 내재된 서브 런큐들이다.
+   - curr는 현재 동작하고 있는 프로세스의 태스크 구조를 표시하고 있다.
+   - idle은 어떤 다른 실행 가능한 프로세스들이 가용하지 않을때 호출되는 아이들 프로세스의 태스크 구조를 표시한다- 아이들
+      트레드
+   - clock 과 prev_raw_clock은 단위 런큐 시계를 구현하는데 사용된다. clock의 값은 주기적인 스케줄러가 호출될때마다 업데이트
+     된다.부가적으로, 커널은 새로운 태스크가 wakeup_new_task에서 깨어날때  런큐를 조정하는 스케줄러에 있는 많은 곳으로부터
+     호출되는 표준 update_rq_clock 함수를 제공한다.
+
+모든 시스템의 런큐는 runqueues 어레이에 쥐고 있다, 이것은 시스템에 있는 각 CPU에 대한 엘리먼트를 포함한다.
+단일 프로세서 시스템에서, 거기에는 단지 하나의 런큐가 필요로하기때문에 물론 하나의 엘리먼트만 있다.
+
+    kernel/sched.c
+        static DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+
+커널은 또한 편리한 매크로들의 숫자를 정의한다, 이것들은 자체 설명이다.
+
+
+    kernel/sched.c
+        #define cpu_rq(cpu) (&per_cpu(runqueues, (cpu)))
+        #define this_rq() (&__get_cpu_var(runqueues))
+        #define task_rq(p) cpu_rq(task_cpu(p))
+        #define cpu_curr(cpu) (cpu_rq(cpu)->curr)
+
+Scheduling Entities
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+스케줄러는 태스크들보다 좀더 일반적인 엔티티들과 동작할 수 있기때문에, 적당한 데이터 구조는 그러한 엔티디를 서술하는데
+필요하다. 그것은 다음과 같다:
+
+    <sched.h>
+        struct sched_entity {
+        struct load_weight load; /* for load-balancing */
+        struct rb_node run_node;
+        unsigned int on_rq;
+        u64 exec_start;
+        u64 sum_exec_runtime;
+        u64 vruntime;
+        u64 prev_sum_exec_runtime;
+        ...
+        }
+
 
 
 
