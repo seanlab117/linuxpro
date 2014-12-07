@@ -2655,15 +2655,74 @@ load.set_load_weight는 프로세스 타입과 그것의 정적 우선권에 의
 
 .. image:: ./img/fig2_15.png
 
+변환을 수행하는 코드는 항상 실시간 태스크들을 고려할 필요가 있다. 이것들은 일반 태스크의 2배의 무게를 얻을 것이다.
+SCHED_IDLE 태스크들은 ,반대로, 아주 작은 무게를 받을 것이다.
+
+
+        kernel/sched.c
+            #define WEIGHT_IDLEPRIO 2
+            #define WMULT_IDLEPRIO (1 << 31)
+
+            static void set_load_weight(struct task_struct *p)
+            {
+            if (task_has_rt_policy(p)) {
+                p->se.load.weight = prio_to_weight[0] * 2;
+                p->se.load.inv_weight = prio_to_wmult[0] >> 1;
+            return;
+            }
+            /*
+            * SCHED_IDLE tasks get minimal weight:
+            */
+            if (p->policy == SCHED_IDLE) {
+            p->se.load.weight = WEIGHT_IDLEPRIO;
+            p->se.load.inv_weight = WMULT_IDLEPRIO;
+            return;
+            }
+            p->se.load.weight = prio_to_weight[p->static_prio - MAX_RT_PRIO];
+            p->se.load.inv_weight = prio_to_wmult[p->static_prio - MAX_RT_PRIO];
+            }
+
+커널은 단지 자기 자신의 무게를 계산할 뿐아니라, 분기를 위한 값을 저장한다. 단위 우선권당 10% CPU 타임을 허용하는 것은
+무게의 잠재적 행동으로 유도한다는 것을 명심하라. 이것은 Figure 2-15 에 명시되었다. 그림에서 윗쪽 삽화는 보통의 우선권의
+제한된 영역을 위한 그래프이다. 아랫족 삽화는 y축에 로그 비례를 채택했다.  그함수는 보통에서 실시간 프로세스들의 변환점에서
+비연속적이다라는 것을 명심하라.
+
+프로세스들뿐아니라 실행 큐들은 로드 무게와 연관되어있다는 것을 명심하라. 하나의 프로세스는 실행큐에 추가가 될때마다,
+커널은 inc_nr_running을 호출한다. 이것은 런큐가 얼마나 많은 프로세스들을 실행하고 있는가를 체크한다는 것일뿐아니라,
+프로세스의 무게를 실행의 무게에 추가한다는 것을 확신시켜 준다.
+
+        kernel/sched.c
+            static inline void update_load_add(struct load_weight *lw, unsigned long inc)
+            {
+            lw->weight += inc;
+            }
+            static inline void inc_load(struct rq *rq, const struct task_struct *p)
+            {
+            update_load_add(&rq->load, p->se.load.weight);
+            }
+            static void inc_nr_running(struct task_struct *p, struct rq *rq)
+            {
+            rq->nr_running++;
+            inc_load(rq, p);
+            }
+
+관련함수( dec_nr_running,dec_load, update_load_sub) 는 프로세스가 실행큐에서 제거가 될때 호출된다.
 
 
 
-Dealing with Priorities
+
+
+2.5.4 Core Scheduler
 ----------------------------------
 
+위에서 언급했듯이, 스케줄러 구현은 두개의 함수에 기초를 한다- 주기적인 스케줄러와 메인 스케줄러 함수. 이것들은 CPU 타임을
+가용한 프로세스들의 우선권에 기초를 하여 분산을 한다. 이것은 왜 모든 방법들이 우선권 스케줄링으로 언급되는지 이유이다.
+이것이 일반적인 어휘일지라도, 나는 우선권 스케줄링을 어떻게 구현하는지 이곳에서 논한다.
 
-Core Scheduler
-----------------------------------
+The Periodic Scheduler
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
 
 
 
