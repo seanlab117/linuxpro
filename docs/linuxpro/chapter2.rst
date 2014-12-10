@@ -2741,7 +2741,7 @@ The Periodic Scheduler
             __update_rq_clock(rq)
             update_cpu_load(rq);
 
-그 함수의 첫번째 부분은 런큐 시계를 업데이트 하는것을 다룬다. 
+그 함수의 첫번째 부분은 런큐 시계를 업데이트 하는것을 다룬다.
 
 
 
