@@ -2741,8 +2741,10 @@ The Periodic Scheduler
             __update_rq_clock(rq)
             update_cpu_load(rq);
 
-그 함수의 첫번째 부분은 런큐 시계를 업데이트 하는것을 다룬다.
-
+그 함수의 첫번째 부분은 런큐 시계를 업데이트 하는것을 다룬다. 이것은 __update_rq_clock을 대표하며 기본적으로
+현재의 struct_rq 인스턴스의 clock 타임 스탬프를 앞선다. 그 함수는 하드웨어 클락의 몇가지 이상한 점을 다뤄야만 한다.
+그러나 이런것들은 우리의 목적과는 상관이 없다. update_cpu_load 는 런큐의 cpu_load[]  히스토리 어레이를 업데이트 하는것을
+다룬다.
 
 
 
