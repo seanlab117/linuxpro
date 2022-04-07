@@ -2772,7 +2772,27 @@ The Periodic Scheduler
 
 Data Structures
 ----------------------------------
+우선 CFS가 어떻게 큐를 실행하는지 설명할 필요가 있다. 하나의 인스턴스가 각각의 CPU가 메인 스케줄러를
+실행한다는 것을 상기하자.
 
+
+    kernel/sched.c
+        struct cfs_rq {
+        struct load_weight load;
+        unsigned long nr_running;
+        u64 min_vruntime;
+        struct rb_root tasks_timeline;
+        struct rb_node *rb_leftmost;
+        struct sched_entity *curr;
+    }
+
+개별 요소들은 다음 의미를 가지고 있다.
+
+    ❑ nr_running은 큐에서 실행할 수 있는 프로세스의 숫자를 센다. load는 그 모든것들의 누적 로드
+       값을 유지한다.  이미 2.5.3장에서 로드 누적이란것을 접했음을 상기하자.
+
+    ❑ min_vruntime은 큐에 있는 모든 프로세스들의 최소 가상 실행 시간을 추적한다.
+        이러한 값들은 실행큐에 관련이 있는 가상 시계를 구현하는데 기초한다.
 
 CFS Operations
 ----------------------------------
