@@ -2750,6 +2750,24 @@ The Periodic Scheduler
 
 2.6 The Completely Fair Scheduling Class
 =========================================
+완전한 쌍 스케줄러에 관한 모든 필요로 하는 중요 스케줄러 정보는 fair_sched_class 안에 있다.
+    kernel/sched_fair.c
+    static const struct sched_class fair_sched_class = {
+        .next = &idle_sched_class,
+        .enqueue_task = enqueue_task_fair,
+        .dequeue_task = dequeue_task_fair,
+        .yield_task = yield_task_fair,
+        .check_preempt_curr = check_preempt_wakeup,
+        .pick_next_task = pick_next_task_fair,
+        .put_prev_task = put_prev_task_fair,
+        ...
+        .set_curr_task = set_curr_task_fair,
+        .task_tick = task_tick_fair,
+        .task_new = task_new_fair,
+    };
+
+이전장에서 메인 스케줄러에서 이런 함수들이 호출된다는것을 논의했고 다음으로 어떻게 CFS를 구현하는지
+점검하게 될것이다.
 
 
 Data Structures
