@@ -2807,11 +2807,64 @@ Queue Manipulation
 
 Selecting the Next Task
 ----------------------------------
-
+우선,  이  함수는  실행  큐의  현재  실행  프로세스를  결정하고  또한  각  스케줄러  틱에서  업데이트되는  메인  스케줄러  실행  큐의  실제  시계  값을  얻습니다.
+(rq_of는  struct  rq의  인스턴스를  결정하는  보조  함수  입니다 .  CFS  실행  대기열과  연결됨):
+static void update_curr(struct cfs_rq *cfs_rq)
+{
+    struct sched_entity *curr = cfs_rq->curr;
+    u64 now = rq_of(cfs_rq)->clock;
+    unsigned long delta_exec;
+    if (unlikely(!curr))
+        return;
 
 Handling the Periodic Tick
 ----------------------------------
+현재  실행  큐에서  실행  중인  프로세스가  없다면  분명히  아무  것도  할  수  없습니다.  그렇지  않으면  커널은  로드  통계의
+마지막  업데이트와  지금  사이의  시간  차이를  계산하고  나머지  작업을  __update_curr에  위임합니다.
+kernel/sched_fair.c
+    delta_exec = (unsigned long)(now - curr->exec_start);
+        __update_curr(cfs_rq, curr, delta_exec);
+    curr->exec_start = now;
+}
+이  정보를  기반으로  __update_curr는  현재  프로세스가  CPU에서  실행하는  데  소비한  물리적  및  가상  시간을  업데이트해야  합니다.
+물리적인  시간으로는  간단합니다.  이전에  계산된  시간에  시차를  추가하면  됩니다.
+kernel/sched_fair.c
+static inline void
+    __update_curr(struct cfs_rq *cfs_rq, struct sched_entity *curr,
+        unsigned long delta_exec)
+    {
+        unsigned long delta_exec_weighted;
+        u64 vruntime;
+        curr->sum_exec_runtime += delta_exec;
+        ...
+흥미로운  점은  존재하지  않는  가상  시계가  주어진  정보를  사용하여  어떻게  에뮬레이트되는지입니다.
+다시  한  번,  커널은  영리하며  일반적인  경우에  시간을  절약합니다.
+nice  레벨  0에서  실행되는  프로세스의  경우  가상  시간과  물리적  시간은  정의상  동일합니다.
+다른  우선순위가  사용되는  경우  프로세스의  로드  가중치에  따라  시간에  가중치를  부여해야  합니다
+(프로세스  우선순위와  로드  가중치가  어떻게  연결되는지  섹션  2.5.3에서  논의했음을  기억하세요).
+kernel/sched_fair.c
+    delta_exec_weighted = delta_exec;
+        if (unlikely(curr->load.weight != NICE_0_LOAD)) {
+            delta_exec_weighted = calc_delta_fair(delta_exec_weighted,
+            &curr->load);
+        }
+        curr->vruntime += delta_exec_weighted;
+    ...
 
+일부  반올림  및  오버플로  검사를  무시하고  calc_delta_fair가  수행하는  작업은
+다음  공식으로  제공된  값을  계산하는  것입니다.
+
+delta_exec_weighted = delta_exec × NICE_0_LOAD
+                                    curr->load.weight
+
+위에서  언급한  역  가중치  값은  이  계산에  유용하게  사용될  수  있습니다.
+우선  순위가  높은(예:  낮은  nice  값)  더  중요한  작업은  더  큰  가중치를  가지  므로  해당  작업에  고려되는  가상  런타임은  더  작아집니다.
+그림  2-18은  다양한  우선순위에  대한  실제  시간과  가상  시간  간의  연결을  보여줍니다.
+또한  공식을  통해  우선  순위가  120인  nice  0  작업에  대해  가상  시간과  물리적  시간이  동일  하다는  것을  알  수  있습니다 .
+즉,  current->load.weight  가  NICE_0_LOAD  인  경우입니다.
+그림  2-18의  삽화는  더  넓은  범위의  우선순위를  보여주기  위해  이중  로그  플롯을  사용한다는  점에  유의하십시오.
+
+.. image:: ./img/fig2_18.png
 
 Wake-up Preemption
 ----------------------------------
