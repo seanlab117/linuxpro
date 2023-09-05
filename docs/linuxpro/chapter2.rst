@@ -3161,14 +3161,48 @@ if (sysctl_sched_child_runs_first && curr->vruntime < se->vruntime) {
 2.7 The Real-Time Scheduling Class
 =====================================
 
+POSIX  표준에  따라  Linux는  '일반'  프로세스  외에  두  가지  실시간  스케줄링  클래스를  지원합니다.
+스케줄러의  구조를  통해  코어  스케줄러를  변경하지  않고도  실시간  프로세스를  커널에  통합할  수  있습니다.
+이는  스케줄링  클래스의  결정적인  장점입니다.31
+지금은  오래  전에  논의된  사실  중  일부를  회상하기에  좋은  장소입니다.
+실시간  프로세스는  일반  프로세스보다  우선순위가  높다는  사실로  식별할  수  있습니다.
+따라서  그림  2-14에  표시된  것처럼  static_prio  값은  항상  일반  프로세스보다  낮습니다 .
+rt_task  매크로는  다음과  같습니다 .
 
-Properties
+주어진  작업이  실시간  프로세스인지  여부를  우선순위를  검사하여  확인하기  위해  제공되며,  task_has_rt_policy는
+프로세스가  실시간  스케줄링  정책과  연결되어  있는지  확인합니다.
+
+2.7.1 Properties
 ----------------------------------
+실시간  프로세스는  한  가지  본질적인  측면에서  일반  프로세스와  다릅니다.
+실시간  프로세스가  시스템에  존재하고  실행  가능한  경우  우선  순위가  더  높은  다른  실시간  프로세스가  없는  한
+스케줄러에  의해  항상  선택됩니다.
+사용  가능한  두  가지  실시간  클래스는  다음과  같이  다릅니다.
+운드  로빈  프로세스  (SCHED_RR)  에는  일반  프로세스인  경우  실행  시  값이  감소하는  타임  슬라이스가  있습니다.
+모든  시간  할당량이  만료되면  값은  초기  값으로  재설정되지만  프로세스는  대기열  끝에  배치됩니다.
+이렇게  하면  동일한  우선순위를  가진  여러  SCHED_RR  프로세스가  있는  경우  항상  차례로  실행됩니다.
+입선출  프로세스  (SCHED_FIFO)  에는  시간  분할이  없으며  일단  선택되면  원하는  만큼  실행이  허용됩니다.
 
+잘못  프로그래밍된  실시간  프로세스로  인해  시스템을  사용할  수  없게  될  수  있다는  것은  명백합니다.
+필요한  것은  루프  본체가  절대로  잠들지  않는  무한  루프뿐입니다.
+따라서  실시간  애플리케이션을  작성할  때는  각별한  주의가  필요합니다.
 
-Data Structures
+2.7.2 Data Structures
 ----------------------------------
+실시간  작업에  대한  예약  클래스는  다음과  같이  정의됩니다.
 
+kernel/sched-rt.c
+const struct sched_class rt_sched_class = {
+        .next = &fair_sched_class,
+        .enqueue_task = enqueue_task_rt,
+        .dequeue_task = dequeue_task_rt,
+        .yield_task = yield_task_rt,
+        .check_preempt_curr = check_preempt_curr_rt,
+        .pick_next_task = pick_next_task_rt,
+        .put_prev_task = put_prev_task_rt,
+        .set_curr_task = set_curr_task_rt,
+        .task_tick = task_tick_rt,
+};
 
 Scheduler Operations
 ----------------------------------
