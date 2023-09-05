@@ -2865,13 +2865,296 @@ delta_exec_weighted = delta_exec × NICE_0_LOAD
 그림  2-18의  삽화는  더  넓은  범위의  우선순위를  보여주기  위해  이중  로그  플롯을  사용한다는  점에  유의하십시오.
 
 .. image:: ./img/fig2_18.png
+마지막으로  커널은  min_vruntime을  설정해야  합니다.  값이  단조롭게  증가하도록  주의해야  합니다.
 
-Wake-up Preemption
+kernel/sched_fair.c
+/*
+* maintain cfs_rq->min_vruntime to be a monotonically increasing
+* value tracking the leftmost vruntime in the tree.
+*/
+if (first_fair(cfs_rq)) {
+    vruntime = min_vruntime(curr->vruntime,
+        __pick_next_entity(cfs_rq)->vruntime);
+    } else
+        vruntime = curr->vruntime;
+
+        cfs_rq->min_vruntime =
+        max_vruntime(cfs_rq->min_vruntime, vruntime);
+    }
+first_fair  는  트리에  가장  왼쪽  요소가  있는지,  즉  프로세스가  있는지  확인하는  도우미  함수입니다.
+트리에서  예약이  되기를  기다리고  있습니다.  그렇다면  커널은  가장  작은  vruntime을  얻습니다.
+트리의  요소.  트리의  가장  왼쪽  요소가  비어  있어서  트리에  없으면  가상  런타임은대신  현재  프로세스가  사용됩니다.
+큐당  min_vruntime이  단조롭게  증가하도록  하려면커널은  두  값  중  더  큰  값으로  설정합니다.
+즉,  큐당  min_vruntime은  다음과  같은  경우에만  업데이트됩니다.트리에  있는  요소  중  하나의  vruntime  이  초과됩니다 .
+이  정책을  통해  커널은  다음을  보장합니다. min_vrtime은  증가만  할  수  있고  감소할  수는  없습니다.
+
+완전히  공정한  스케줄러의  중요한  점  중  하나는  레드-블랙  트리의  정렬  프로세스가  다음  키를  기반으로  한다는  것입니다.
+
+kernel/sched_fair.c
+static inline s64 entity_key(struct cfs_rq *cfs_rq, struct sched_entity *se)
+{
+    return se->vruntime - cfs_rq->min_vruntime;
+}
+키가  작은  요소는  더  왼쪽에  배치되므로  더  빠르게  예약됩니다.
+이러한  방식으로  커널은  두  가지  적대적인  메커니즘을  구현합니다
+
+1.  프로세스가  실행  중일  때  vruntime  은  꾸준히  증가하여  마침내  오른쪽으로  이동합니다.
+레드-블랙  트리의  병동.
+vruntime은  더  중요한  프로세스에  대해  더  느리게  증가하고  오른쪽으로  더  느리게
+이동하므로  필요에  따라  덜  중요한  프로세스보다  예약될  기회가  더  큽니다.
+2.  프로세스가  휴면  상태인  경우  해당  vruntime은  변경되지  않은  상태로  유지됩니다.  큐별로
+min_vruntime은  그  동안  증가합니다(단조적이라는  점을  기억하세요!).
+키가  작아지기  때문에  잠에서  깨어난  후  슬리퍼는  더  왼쪽에  배치됩니다 .
+
+실제로  두  효과는  자연스럽게  동시에  발생하지만  해석에는  영향을  미치지  않습니다.
+그림  2-19는  레드-블랙  트리의  다양한  이동  메커니즘을  그래픽으로  보여줍니다.
+
+.. image:: ./img/fig2_19.png
+
+Latency Tracking
+커널에는  좋은  스케줄링  대기  시간,  즉  모든  실행  가능한  작업이  적어도  한  번  실행되어야  하는
+간격에  대한  내장된  개념이  있습니다.29  이는 /proc/sys/  를  통해  제어할  수  있는  sysctl_sched_latency  에  제공됩니다.
+kernel/sched_latency_ns  및  기본값은  각각  20,000,000ns(나노초)  및  20ms(밀리초)입니다.
+두  번째  제어  매개변수인  sched_nr_latency는  한  대기  시간  동안  최대로  처리되는  활성  프로세스의  수를  제어합니다.
+활성  프로세스  수가  이  한도보다  커지면  대기  시간이  선형적으로  연장됩니다.
+sched_nr_latency는 /proc/sys/kernel/sched_min_granularity_ns를  통해  설정할  수  있는
+sysctl_sched_min_granularity  를  통해  간접적으로  제어할  수  있습니다 .
+기본값은  4,000,000ns,  즉  4ms이고  sched_nr_latency  는
+값  중  하나가  변경될  때마다  sysctl_sched_latency/sysctl_sched_min_granularity  로  계산됩니다 .
+__sched_  period는  대기  시간의  길이를  결정합니다.  이는  일반적으로  sysctl_sched_latency  이지만  더  많은  프로세스가  실행되면  선형적으로  연장됩니다.
+이  경우  기간은  다음과  같다.
+sched_latency× nr_running
+                sched_nr_latency
+하나의  대기  시간  동안  활성  프로세스  간의  시간  분배는  각  작업의  상대적  가중치를  고려하여  수행됩니다.
+예약  가능한  엔터티로  표시되는  특정  프로세스의  슬라이스  길이는  다음과  같이  계산됩니다.
+kernel/sched_fair.c
+
+static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
+{
+    u64 slice = __sched_period(cfs_rq->nr_running);
+    slice *= se->load.weight;
+    do_div(slice, cfs_rq->load.weight);
+    return slice;
+    }
+
+실행  큐  로드  가중치는  큐에  있는  모든  활성  프로세스의  로드  가중치를  누적한다는  점을  기억하세요.
+결과  시간  조각은  실시간으로  제공되지만 커널은  때때로  가상  시간으로  이에  상응하는  것을  알아야  할  수도  있습니다.
+
+kernel/sched_fair.c
+static u64 __sched_vslice(unsigned long rq_weight, unsigned long nr_running)
+{
+    u64 vslice = __sched_period(nr_running);
+    vslice *= NICE_0_LOAD;
+    do_div(vslice, rq_weight);
+    return vslice;
+}
+static u64 sched_vslice(struct cfs_rq *cfs_rq)
+{
+    return __sched_vslice(cfs_rq->load.weight, cfs_rq->nr_running);
+}
+
+주어진  가중치를  가진  프로세스의  실시간  간격  시간은  다음과  같습니다.
+time × NICE_0_LOAD
+        weight
+이는  대기  시간  간격  부분을  전송하는  데에도  사용됩니다.이제  전역  스케줄러와  상호  작용하기  위해
+CFS에서  구현해야  하는  다양한  방법을  논의할  수  있는  모든  것이  준비되었습니다.
+
+2.6.3 Queue Manipulation
 ----------------------------------
+실행  큐에서  요소를  이동하는  데에는  enqueue_task_fair  및  dequeue_task_fair라는  두  가지  함수를  사용할  수  있습니다.
+먼저  실행  큐에  새  작업을  배치하는  데  집중하겠습니다.
+일반  실행  큐에  대한  포인터와  문제의  작업  구조  외에도  이  함수는  wakeup이라는  매개변수를  하나  더  받아들입니다.
+이를  통해  대기열에  추가된  작업이  최근에  깨어나서  실행  상태로  변경되었는지  (이  경우  wakeup  은  1)  또는  이전에
+실행  가능했는지  (그때  wakeup  은  0)  지정할  수  있습니다.
+enqueue_task_fair  의  코드  흐름  다이어그램은  그림  2-20에  나와  있습니다.
 
+.. image:: ./img/fig2_20.png
 
-Handling New Tasks
+struct  sched_entity  의  on_rq  요소  에  의해  신호된  대로  작업이  이미  실행  큐에  있는  경우  아무  작업도  수행할
+필요가  없습니다.  그렇지  않으면  작업이  enqueue_entity에  위임됩니다.  여기서  커널은  updater_curr를  사용하여  통계를
+업데이트할  기회를  얻습니다.
+작업이  최근에  실행된  경우  가상  런타임은  여전히  유효하며  (현재  실행  중이  아닌  한)  __enqueue_entity를  사용하여
+레드-블랙  트리에  직접  포함될  수  있습니다 .  이  함수는  레드-블랙  트리를  처리하기  위해  몇  가지  메커니즘이  필요하지만
+커널의  표준  방법에  의존할  수  있으므로(자세한  내용은  부록  C  참조)  그다지  흥미롭지  않습니다.  중요한  점은  프로세스가
+적절한  위치에  배치된다는  것입니다.  그러나  이는  프로세스의  vruntime  필드를  설정하고  대기열에  대해  커널이  수행하는
+지속적인  min_vruntime  업데이트  를  통해  이전에  이미  보장되었습니다 .
+프로세스가  이전에  절전  모드였던  경우  먼저  place_entity30  에서  프로세스의  가상  런타임이  조정됩니다 .
+
+kernel/sched_fair.c
+static void
+place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
+
+{
+    u64 vruntime;
+    vruntime = cfs_rq->min_vruntime;
+    if (initial)
+    vruntime += sched_vslice_add(cfs_rq, se);
+    if (!initial) {
+        vruntime -= sysctl_sched_latency;
+        vruntime = max_vruntime(se->vruntime, vruntime);
+    }
+    se->vruntime = vruntime;
+}
+
+이  함수는  초기  값에  따라  두  가지  경우를  구분합니다 .  이  매개변수는  새  작업이  시스템에  추가된  경우에만  설정되지만
+여기서는  그렇지  않습니다.  초기  값  은  0입니다( 아래  task_new_fair에  대해  논의할  때  다른  경우로  다시  돌아오겠습니다 ).
+커널은  현재  대기  시간  내에  모든  활성  프로세스를  적어도  한  번  실행하기로  약속했기  때문에  대기열의  min_vruntime
+을  기본  가상  시간으로  사용하고  sysctl_sched_latency를  빼면  새로  깨어난  프로세스가  대기  시간  이후에만  실행되도록
+보장됩니다.  현재  대기  시간이  종료되었습니다.
+그러나  큰  se_vruntime  값  으로  표시된  것처럼  Sleeper가  큰  불공평성을  축적한  경우  커널은  이를  존중해야  합니다.
+se->vruntime이  이전에  계산된  차이보다  크면  프로세스의  vruntime  으로  유지되어  레드-블랙  트리에서  왼쪽에  배치됩니다.  큰  vruntime  값은  일찍  예약하는  것이  좋습니다.
+enqueue_entity  로  돌아가  보겠습니다 .  place_entity가  프로세스에  대한  적절한  가상
+런타임을  결정한  후  __enqueue_entity를  사용하여  레드-블랙  트리에  배치됩니다.
+나는  이것이  작업을  레드-블랙  트리로  정렬하기  위해  커널의  표준  방법을  사용하는  순전히  기계적인  기능이라는  것을
+이미  언급했습니다.
+
+2.6.4 Selecting the Next Task
 ----------------------------------
+실행할  다음  작업  선택은  pick_next_task_fair에서  수행됩니다.  코드  흐름  다이어그램은  그림  2-21에  나와  있습니다.
+
+빈  nr_running  카운터  로  표시되는  것처럼  현재  대기열에서  실행할  수  있는  작업이  없으면  수행할  작업이  거의  없으며
+함수가  즉시  반환될  수  있습니다.  그렇지  않으면  작업이  pick_next_entity에  위임됩니다 .
+트리에서  가장  왼쪽  작업을  사용할  수  있는  경우  first_fair  도우미  함수를  사용하여  즉시  확인할  수  있으며
+__pick_next_entity는  레드-블랙  트리에서  sched_entity  인스턴스를  추출합니다 .
+이는  레드-블랙  트리가  sched_entitys  에  포함된  rb_node
+인스턴스를  관리하기  때문에  컨테이너_of  메커니즘을  사용하여  수행됩니다 .
+이제  작업이  선택되었지만  이를  실행  중인  작업으로  표시하려면  추가  작업이  필요합니다.
+이는  set_next_entity에  의해  처리됩니다 .
+
+.. image:: ./img/fig2_21.png
+
+현재  실행  중인  프로세스는  실행  큐에  보관되지  않으므로  __dequeue_entity는  이를  레드-블랙  트리에서  제거하고
+현재  작업이  가장  왼쪽에  있는  작업인  경우  가장  왼쪽  포인터를  다음  가장  왼쪽  작업으로  설정합니다.
+우리의  경우  프로세스는  확실히  실행  대기열에  있었지만  set_next_entity가  다른  위치에서  호출되는  경우에는
+그럴  필요가  없습니다.
+프로세스가  더  이상  레드-블랙  트리에  포함되지  않더라도  프로세스와  실행  큐  사이의  연결은  끊어지지  않습니다.
+curr가  이제  실행  중인  것으로  표시하기  때문입니다.
+kernel/sched_fair.c
+cfs_rq->curr = se;
+    se->prev_sum_exec_runtime = se->sum_exec_runtime;
+}
+
+프로세스가  현재  활성  상태이기  때문에  CPU에서  소비된  실제  시간은  sum_exec_runtime  에  부과되므로  커널은
+prev_sum_exec_runtime의  이전  설정을  유지합니다.
+sum_exec_runtime  은  프로세스에서  재설정  되지  않습니다 .
+따라서  sum_exec_runtime  -  prev_sum_  exec_runtime  의  차이는  CPU에서  실행하는  데  소요된  실제  시간을  나타냅니다.
+
+2.6.5 Handling the Periodic Tick
+----------------------------------
+앞서  언급한  차이점은  주기적인  틱을  처리할  때  중요합니다.  공식적으로  책임  있는  기능은  task_tick_fair
+이지만  실제  작업은  entity_tick에서  수행됩니다.  그림  2-22는  코드  흐름도를  보여줍니다.
+
+.. image:: ./img/fig2_22.png
+
+
+우선  통계는  항상  그렇듯이  update_curr를  사용하여  업데이트됩니다.  큐의  nr_running  카운터가  큐에서  실행할
+수  있는  프로세스가  두  개  미만임을  나타내는  경우  아무  작업도  수행할  필요가  없습니다.프로세스가  선점되어야  한다면
+이를  선점  할  수  있는  다른  프로세스가  최소한 하나  이상  있어야  합니다.
+그렇지  않으면  check_preempt_tick에  대한  결정이  남습니다 .
+
+kernel/sched_fair.c
+static void
+check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+{
+    unsigned long ideal_runtime, delta_exec;
+    ideal_runtime = sched_slice(cfs_rq, curr);
+    delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
+    if (delta_exec > ideal_runtime)
+    resched_task(rq_of(cfs_rq)->curr);
+}
+이  기능의  목적은  대기  시간  공유에  지정된  것보다  더  오랫동안  프로세스가  실행되지  않도록  하는  것입니다.
+실시간으로  이  공유  길이는  sched_slice에서  계산되며,  프로세스가  CPU에서  실행되는  동안의  실시간  간격은  위에서
+설명한  대로  sum_exec_runtime  -  prev_sum_exec_runtime  에  의해  제공됩니다.  따라서  선점  결정은  쉽습니다.
+작업이  원하는  시간  간격보다  오랫동안  실행된  경우  resched_task를  사용하여  일정  변경이  요청됩니다.
+이는  작업  구조에  TIF_NEED_RESCHED  플래그를  설정하고  코어  스케줄러는  다음  적절한  순간에  일정  변경을  시작합니다.
+
+2.6.6 Wake-up Preemption
+----------------------------------
+try_to_wake_up  및  wake_up_new_task  에서  작업이  깨어나면  커널은  check_preempt_curr를  사용하여
+새  작업이  현재  실행  중인  작업을  선점할  수  있는지  확인합니다.  핵심  스케줄러는  이  프로세스에  관여하지  않습니다.
+완전히  공정하게  처리된  작업의  경우  check_  preempt_wakeup  함수가  원하는  검사를  수행합니다.
+
+새로  깨어난  작업은  반드시  완전히  공정한  스케줄러에  의해  처리될  필요는  없습니다.
+새  작업이  실시간  작업인  경우  실시간  작업이  항상  CFS  작업을  선점하므로  일정  변경이  즉시  요청됩니다.
+
+kernel/sched_fair.c
+static void check_preempt_wakeup(struct rq *rq, struct task_struct *p)
+{
+    struct task_struct *curr = rq->curr;
+    struct cfs_rq *cfs_rq = task_cfs_rq(curr);
+    struct sched_entity *se = &curr->se, *pse = &p->se;
+    unsigned long gran;
+    if (unlikely(rt_prio(p->prio))) {
+        update_rq_clock(rq);
+        update_curr(cfs_rq);
+        resched_task(curr);
+        return;
+    }
+...
+
+가장  편리한  경우는  SCHED_BATCH  작업입니다.  정의에  따라  다른  작업을  선점하지  않습니다.
+
+kernel/sched.c
+if (unlikely(p->policy == SCHED_BATCH))
+return;
+...
+
+실행  중인  작업이  새  작업에  의해  선점되면  커널은  이전  작업이  최소한  특정  최소  시간  동안  실행되었는지  확인합니다.
+최소값은  이전에  우리  경로와  교차했던  sysctl_sched_  wakeup_granularity  에  유지됩니다.
+기본적으로  4ms로  설정되어  있음을  기억하세요.
+이는  실시간을  의미하므로  필요한  경우  커널은  먼저  이를  가상  시간으로  변환해야  합니다.
+
+kernel/sched_fair.c
+    gran = sysctl_sched_wakeup_granularity;
+    if (unlikely(se->load.weight != NICE_0_LOAD))
+        gran = calc_delta_fair(gran, &se->load);
+...
+현재  실행  중인  작업의  가상  런타임(스케줄링  엔터티  se로  표시됨)
+이  새  작업의  가상  런타임에  세분성  안전성을  더한  것보다  큰  경우  일정  조정이  요청됩니다.
+kernel/sched_fair.c
+if (pse->vruntime + gran < se->vruntime)
+    resched_task(curr);
+}
+추가된  ''버퍼''  시간은  작업이  너무  자주  전환되지  않도록  하여  실제  작업을  수행하는  대신  컨텍스트
+전환에  너무  많은  시간이  소비되지  않도록  합니다.
+
+2.6.7 Handling New Tasks
+----------------------------------
+우리가  고려해야  할  완전히  공정한  스케줄러의  마지막  작업은  새  작업이  생성될  때  호출되는  후크  함수인  task_new_fair입니다.
+함수의  동작은  다음을  사용하여  제어할  수  있습니다.
+
+매개변수  sysctl_sched_child_runs_first.
+이름에서  알  수  있듯이  새로  생성된  하위  프로세스가  상위  프로세스보다  먼저  실행되어야  하는지  여부를  결정합니다.
+이는  일반적으로  유익하며,  특히  자식이  나중에  exec  시스템  호출을  수행하는  경우  더욱  그렇습니다.
+기본  설정은  1이지만 /proc/sys/kernel/sched_child_runs_first를  통해  변경할  수  있습니다.
+처음에  이  함수는  update_curr  를  사용하여  일반적인  통계  업데이트를  수행한  다음  이전에  논의한
+place_entity를  사용합니다.
+
+kernel/sched_fair.c
+static void task_new_fair(struct rq *rq, struct task_struct *p)
+{
+    struct cfs_rq *cfs_rq = task_cfs_rq(p);
+    struct sched_entity *se = &p->se, *curr = cfs_rq->curr;
+    int this_cpu = smp_processor_id();
+    update_curr(cfs_rq);
+    place_entity(cfs_rq, se, 1);
+...
+
+그러나  이  경우  place_entity  는  초기  값을  1로  설정  하여  호출되며  이는  sched_vslice_add  를  사용하여
+초기  vruntime을  계산하는  것과  같습니다 .  이는  프로세스에  속하지만  가상  시간으로  변환되는  대기  시간  간격의
+일부를  결정한다는  점을  기억하세요.
+이는  프로세스에  대한  스케줄러의  초기  부채입니다.
+kernel/sched_fair.c
+if (sysctl_sched_child_runs_first && curr->vruntime < se->vruntime) {
+    swap(curr->vruntime, se->vruntime);
+    }
+    enqueue_task_fair(rq, p, 0);
+    resched_task(rq->curr);
+}
+부모의  가상  런타임( curr로  표시됨)  이  자식의  가상  런타임보다  작다면  이는  부모가  자식보다  먼저  실행된다는  의미입니다.
+작은  가상  실행  시간은  레드-블랙  트리의  왼쪽  위치를  선호한다는  점을  기억하세요.
+.  자식이  부모보다  먼저  실행되어야  한다면  두  가지의  가상  실행  시간을  바꿔야  합니다.
+그  후  하위  항목은  평소와  같이  실행  대기열에  추가되고  일정  변경이  요청됩니다.
 
 
 
