@@ -3204,16 +3204,155 @@ const struct sched_class rt_sched_class = {
         .task_tick = task_tick_rt,
 };
 
-Scheduler Operations
+코어  실행  큐에는  struct  rt_rq  의  내장  인스턴스로  실시간  작업을  위한  하위  실행  큐도  포함되어  있습니다 .
+
+kernel/sched.c
+struct rq {
+...
+t_rq rt;
+...
+}
+
+실행  대기열은  매우  간단합니다.  연결  목록이면  충분합니다.
+kernel/sched.c
+struct rt_prio_array {
+    DECLARE_BITMAP(bitmap, MAX_RT_PRIO+1); /* include 1 bit for delimiter */
+    struct list_head queue[MAX_RT_PRIO];
+};
+struct rt_rq {
+    struct rt_prio_array active;
+};
+동일한  우선순위를  가진  모든  실시간  작업은  active.queue[prio]로  시작하는  연결된  목록에  보관되며,
+목록  작업이  존재하는  비트맵  active.bitmap  신호는  설정된  비트로  표시됩니다.  목록에  작업이  없으면  비트가
+설정되지  않습니다.  그림  2-23에서는  상황을  보여줍니다.
+
+.. image:: ./img/fig2_23.png
+
+실시간  스케줄러  클래스에  대한  update_cur  의  아날로그는  update_curr_rt입니다.
+이  함수는  현재  프로세스가  sum_exec_runtime의  CPU에서  실행하는  데  소비한  시간을  추적합니다 .
+모든  계산은  실시간으로  수행됩니다.
+가상  시간은  필요하지  않습니다.  이것은  일을  많이  단순화시킵니다.
+
+2.7.3 Scheduler Operations
 ----------------------------------
+작업을  큐에  넣거나  빼는  것은  간단합니다.  작업은  array->queue  +  p->prio에  의해  선택된  적절한  목록에  배치되거나
+각각  제거되며,  적어도  하나의  작업이  존재하는  경우  비트맵의  해당  비트가  설정되거나  제거됩니다.
+대기열에  작업이  남아  있지  않은  경우.  새  작업은  항상  각  목록  끝에  대기열에  추가됩니다.
+두  가지  흥미로운  작업은  다음  작업을  선택하는  방법과  선점을  처리하는  방법입니다.
+다음  작업  선택을  먼저  처리하는  pick_next_task_rt를  고려하세요 .
+코드  흐름  다이어그램은  그림  2-24에  나와  있습니다.
+.. image:: ./img/fig2_24.png
+
+sched_find_first_bit는  active.bitmap  에서  첫  번째  세트  비트를  찾는  표준  함수입니다 .
+즉,  더  높은  실시간  우선순위(커널  내  우선순위가  낮아짐)가  더  낮은  실시간  우선순위보다  먼저  처리된다는  의미입니다.
+선택한  목록의  첫  번째  작업이  제거되고  se.exec_start가  실행  대기열의  현재  실시간  시계  값으로  설정됩니다.
+이것이  필요한  전부입니다.
+주기적  틱의  구현도  마찬가지로  간단합니다.  SCHED_FIFO  작업은  처리하기  가장  쉽습니다.
+원하는  만큼  실행할  수  있으며  항복  시스템  호출을  사용하여  명시적으로  다른  작업에  제어권을  전달해야  합니다.
+
+kernel/sched.c
+static void task_tick_rt(struct rq *rq, struct task_struct *p)
+{
+    update_curr_rt(rq);
+    /*
+    * RR tasks need a special form of timeslice management.
+    * FIFO tasks have no timeslices.
+    */
+    if (p->policy != SCHED_RR)
+        return;
+...
+
+현재  프로세스가  라운드  로빈  프로세스인  경우  해당  시간  조각이  감소됩니다.
+시간  할당량을  아직  초과하지  않은  경우  더  이상  수행할  작업이  없습니다.
+프로세스가  계속  실행될  수  있습니다.
+카운터가  0으로  돌아가면  해당  값은  DEF_TIMESLICE  로  갱신되며  이는  100  *  HZ /  1000,
+즉  100ms  로  설정됩니다 .
+작업이  목록의  유일한  작업이  아닌  경우  끝까지  다시  대기열에  추가됩니다.
+set_tsk_need_resched  로  TIF_NEED_RESCHED
+플래그를  설정하여  평소와  같이  일정  변경이  요청됩니다 .
+
+kernel/sched-rt.c
+    if (--p->time_slice)
+        return;
+    p->time_slice = DEF_TIMESLICE;
+        /*
+        * Requeue to the end of queue if we are not the only element
+        * on the queue:
+        */
+    if (p->run_list.prev != p->run_list.next) {
+        requeue_task_rt(rq, p);
+        set_tsk_need_resched(p);
+    }
+}
+프로세스를  실시간  프로세스로  변환하려면  sched_setscheduler  시스템  호출을  사용해야  합니다.
+이  호출은  다음과  같은  간단한  작업만  수행하므로  자세히  설명하지  않습니다.
+
+ deactivate_task를  사용하여  현재  대기열에서  프로세스를  제거합니다 .  작업  데이
+터  구조에서  실시간  우선순위와  스케줄링  클래스를  설정합니다.
+작업을  다시  활성화합니다.
+프로세스가  이전에  어떤  실행  큐에도  없었다면  스케줄링  클래스와  새  우선순위  값만  설정하면  됩니다.  비활성화  및  재활성화는  필요하지  않습니다.
+스케줄러  클래스  또는  우선  순위  변경은  sched_setscheduler  시스템  호출이  루트  권한(또는  CAP_SYS_NICE  기능)이  있는  프로세스에  의해
+수행되는  경우에만  제약  없이  가능합니다.  그렇지  않으면  다음  조건이  적용됩니다.
+
+스케줄링  클래스는  SCHED_NORMAL  에서  SCHED_BATCH  로  또는  그  반대로만  변경할  수  있습니다.
+SCHED_FIFO  로의  변경은  불가능합니다.
+􀀁  호출자의  EUID와  UID  또는  EUID가  동일한  프로세스의  우선순위만  변경할  수  있습니다.  또한  우선순위는  감소
+할  수만  있고  증가할  수는  없습니다.
+
+
+
 
 
 2.8 Scheduler Enhancements
 ================================
+지금까지  우리는  실시간  시스템에서의  스케줄링만  고려했습니다.  당연히  Linux가  약간  더  나을  수  있습니다.
+다중  CPU  지원  외에도  커널은  다음  섹션에서  설명하는  스케줄링과  관련된  몇  가지  다른  향상된  기능도  제공합니다.
+그러나  이러한  개선  사항으로  인해  스케줄러가  훨씬  더  복잡해졌으므로  기본  원칙을  밝히는
+단순화된  상황을  주로  고려할  것이지만  모든  경계  사례와  스케줄링  이상한  점을  설명하지는  않습니다.
 
-
-SMP Scheduling
+2.8.1 SMP Scheduling
 ----------------------------------
+다중  프로세서  시스템에서  커널은  좋은  스케줄링을  보장하기  위해  몇  가지  추가  문제를  고려해야  합니다.
+CPU  로드는  사용  가능한  프로세서를  통해  최대한  공정하게  공유되어야  합니다. 거의  만들지  않는다.
+한  프로세서가  세  개의  동시  애플리케이션을  담당하고  다른  프로세서는  유휴  작업만  처리하는지  감지합니다.
+스템의  특정  프로세서에  대한  작업  선호도  를  선택할  수  있어야  합니다.  이를  통해  예를  들어  계산  집약적인  애플리케
+션을  4-CPU  시스템의  처음  3개  CPU에  바인딩하고  나머지(대화형)  프로세스는  네  번째  CPU에서  실행하는  것이  가능합니다.
+
+커널은  한  CPU에서  다른  CPU로  프로세스를  마이그레이션할  수  있어야  합니다.  그러나  이  옵션은  성능을  심각하게  저하시
+킬  수  있으므로  주의해서  사용해야  합니다.  CPU  캐시는  소규모  SMP  시스템에서  가장  큰  문제입니다.
+매우  큰  시스템  의  경우  CPU는  말  그대로  이전에  사용된  메모리에서  몇  미터  떨어진  곳에  위치할  수  있으므로
+이에  대한  액세스  비용이  매우  많이  듭니다.
+
+특정  CPU에  대한  작업의  선호도는  위에  지정된  작업  구조의  cpus_allowed  요소에  정의됩니다.
+Linux는  이  할당을  변경하기  위해  sched_setaffinity  시스템  호출을  제공합니다.
+
+Extensions to the Data Structures
+--------------------------------------
+각  스케줄러  클래스가  제공해야  하는  스케줄링  방법은  SMP  시스템의  두  가지  추가  기능으로  강화됩니다.
+<sched.h>
+struct sched_class {
+...
+#ifdef CONFIG_SMP
+    unsigned long (*load_balance) (struct rq *this_rq, int this_cpu,
+        struct rq *busiest, unsigned long max_load_move,
+        struct sched_domain *sd, enum cpu_idle_type idle,
+        int *all_pinned, int *this_best_prio);
+    int (*move_one_task) (struct rq *this_rq, int this_cpu,
+        struct rq *busiest, struct sched_domain *sd,
+        enum cpu_idle_type idle);
+#endif
+...
+}
+
+그러나  이름에도  불구하고  해당  기능은  로드  밸런싱을  직접적으로  담당하지  않습니다.
+커널이  재조정이  필요하다고  판단할  때마다  코어  스케줄러  코드에  의해  호출됩니다.
+그런  다음  스케줄러  클래스별  함수는  일반  코드가  잠재적인  후보인  모든  프로세스를  통과하여  다른  대기열로
+이동할  수  있도록  하는  반복자를  설정합니다.  그러나  개별  스케줄러  클래스의  내부  구조는  일반  코드에
+노출되어서는  안  됩니다 .
+반복자의.  load_balance는  일반  함수  load_balance를  사용  하고  move_one_task는  iter_move_one_task를  사용합니다 .
+기능은  다양한  용도로  사용됩니다.
+
+
 
 
 Scheduling Domains and Control Groups
