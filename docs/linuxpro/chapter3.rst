@@ -1781,13 +1781,191 @@ Alternative Division
 include/asm-x86/page_32.h
 #define __PAGE_OFFSET # ((unsigned long)CONFIG_PAGE_OFFSET)
 
+표  3-6은  가상  주소  공간을  분할할  수  있는  모든  가능성과  매핑할  수  있는  최대  RAM  크기를  수집합니다
+.. image:: ./img/table3_6.png
+커널을  3:1이  아닌  비율로  분할하는  것은  특정  시나리오(예:  주로  커널에서  코드를  실행하는  시스템의  경우)에  적합할  수  있습니다.
+네트워크  라우터를  생각해  보세요.  그러나  일반적인  경우에는  3:1  비율이  가장  좋습니다.
+
+Splitting the Virtual Address Space
+--------------------------------------
+paging_init는  위에서  설명한  대로  가상  주소  공간을  분할하기  위해  부팅  프로세스  중에  IA-32  시스템에서  호출됩니다.
+코드  흐름  다이어그램은  그림  3-16에  나와  있습니다.
+
+.. image:: ./img/fig3_16.png
+
+pagetable_init는  먼저  swapper_pg_dir을  기본으로  사용하여  시스템의  페이지  테이블을  초기화합니다  (이것은변수는  이전에  임시  데이터를  보유하는  데  사용되었습니다).  모든  최신  버전에서  두  가지  확장  기능  사용  가능그런  다음  IA-32  변형이  활성화됩니다(매우  오래된  Pentium  구현  중  일부만이  이를  지원하지  않습니다).
+􀀁  대용량  메모리  페이지를  지원합니다.  특별히  표시된  페이지의  크기는  일반적인  페이지  대신  4MiB입니다.
+4KiB.  이  옵션은  커널  페이지가  교체되지  않기  때문에  커널  페이지에  사용됩니다.
+증가페이지  크기는  더  적은  수의  페이지  테이블  항목이  필요하다는  것을  의미하며  이는  페이지  테이블에  긍정적인  영향을
+미칩니다. TLB(변환  참조  버퍼)는  커널  데이터의  부담을  줄여줍니다.
+
+가능하다면  커널  페이지에는  추가  속성  (_PAGE_GLOBAL)  이  제공됩니다 .
+__PAGE_GLOBAL  비트는  __PAGE_KERNEL  및  __PAGE_KERNEL_EXEC  변수  에서  활성화됩니다 .  이것들
+변수는  페이지가  할당될  때  커널  자체에  대해  설정된  플래그를  지정합니다.  따라서  이러한  설정은  자동으로  커널  페이지로  전송됩니다.
+_PAGE_GLOBAL  비트  가  설정된  페이지의  TLB  항목은  컨텍스트  전환  중에  TLB에서  플러시되지  않습니다.
+커널은  항상  가상  주소  공간의  동일한  위치에  존재하므로  시스템  성능이  향상되고  커널  데이터를  가능한  한  빨리  사용할  수
+있어야  한다는  점에서  반가운  효과가  있습니다.
+
+
+PAGE_OFFSET  기준으로  물리적  페이지(또는  위에서  설명한  첫  번째  896MiB)를  가상  주소  공간으로  매핑하는  것은
+kernel_physical_mapping_init  의  도움으로  수행됩니다 .
+커널은  다양한  페이지  디렉토리의  모든  관련  항목을  연속적으로  검색하고  포인터를  올바른  값으로  설정합니다.
+그런  다음  수정  맵  항목과  영구  커널  매핑을  위한  영역이  설정됩니다.
+다시  말하지만  이는  페이지  테이블을  적절한  값으로  채우는  것과  같습니다.
+pagetable_init  를  사용한  페이지  테이블  초기화가  완료  되면  cr3  레지스터에는  사용된  페이지  전역  디렉터리  (swapper_pg_dir)에
+대한  포인터가  제공됩니다.
+이는  새  페이지  테이블을  활성화하는  데  필요합니다.  cr3  레지스터를  재할당하면  IA-32  시스템에  정확히  이러한  효과가  있습니다.
+TLB  항목도  여전히  부팅  메모리  할당  데이터를  포함하고  있으므로  플러시되어야  합니다.  __flush_all_tlb는  필요한  작업을  수행합니다.
+컨텍스트  전환  중  TLB  플러시와  달리  _PAGE_GLOBAL  비트가  있는  페이지도  플러시됩니다.
+
+kmap_init는  전역  변수  kmap_pte를  초기화합니다.
+커널은  이  변수를  사용하여  나중에  highmem  영역의  페이지를  커널  주소  공간에  매핑하는  데  사용되는  영역에  대한  페이지  테이블
+항목을  저장합니다.
+게다가  highmem  커널  매핑을  위한  첫  번째  Fixmap  영역의  주소는  전역  변수  kmem_vstart에  저장됩니다.
+
+Initialization of the Hot-n-Cold Cache
+--------------------------------------
+섹션  3.2.2에서  이미  CPU당(또는  hot-n-cold)  캐시에  대해  언급했습니다.
+여기서는  관련  데이터  구조의  초기화와  캐시  채우기를  제어하는  데  사용되는  '워터마크'  계산을  다룹니다.  행동
+zone_pcp_init  는  캐시  초기화를  담당합니다.
+커널은  free_area_init_nodes  에서  함수를  호출하며 ,  이  함수는  IA-32  및  AMD64  모두에서  부팅하는  동안  호출됩니다.
+
+mm/page_alloc.c
+static __devinit void zone_pcp_init(struct zone *zone)
+{
+int cpu;
+unsigned long batch = zone_batchsize(zone);
+for (cpu = 0; cpu < NR_CPUS; cpu++) {
+setup_pageset(zone_pcp(zone,cpu), batch);
+}
+if (zone->present_pages)
+printk(KERN_DEBUG " %s zone: %lu pages, LIFO batch:%lu\n",
+zone->name, zone->present_pages, batch);
+}
+
+zone_batchsize를  사용하여  배치  크기(최소  및  최대  채우기  수준  계산의  기초)가  결정되면  코드는  시스템의  모든  CPU를  반복하고
+setup_pageset을  호출하여  각  per_cpu_pageset  인스턴스  의  상수를  채웁니다 .
+이  함수가  호출될  때  사용되는  zone_pcp  매크로  는  현재  검사  중인  CPU와  연관된  영역의  페이지  세트  인스턴스를  선택합니다.
+
+워터마크가  어떻게  계산되는지  자세히  살펴보겠습니다.
+
+mm/page_alloc.c
+inline void setup_pageset(struct per_cpu_pageset *p, unsigned long batch)
+{
+struct per_cpu_pages *pcp;
+memset(p, 0, sizeof(*p));
+pcp = &p->pcp[0]; /* hot */
+pcp->count = 0;
+pcp->high = 6 * batch;
+pcp->batch = max(1UL, 1 * batch);
+INIT_LIST_HEAD(&pcp->list);
+pcp = &p->pcp[1]; /* cold*/
+pcp->count = 0;
+pcp->high = 2 * batch;
+pcp->batch = max(1UL, batch/2);
+INIT_LIST_HEAD(&pcp->list);
+}
 
 
 
 
+코드는  해당  영역에  있는  페이지의  약  1,000분의  25%에  해당하도록  배치를  계산합니다.  또한  시프트  연산은  계산된  값이  2n
+􀀁  1  형식을  갖도록  보장합니다.  왜냐하면  이것이  대부분의  시스템  로드에  대한  캐시  앨리어싱  효과를  최소화한다는  것이  경험적으로
+확립되었기  때문입니다.  fls  는  값의  마지막  세트  비트를  생성하는  시스템별  작업입니다.  이  정렬로  인해  결과  값이  영역
+페이지의  1/1000  25%에서  벗어나게  됩니다.  배치  =  22  인  경우  최대  편차가  발생합니다.  22  +  11
+􀀁  1  =  32이므로  fls는  비트  5를  숫자의  마지막  세트  비트로  찾고  1  <<  5  -  1  =  31을  찾습니다 .
+왜냐하면  편차는  일반적으로  더  작기  때문입니다. ,  모든  실제적인  목적을  위해  무시될  수  있습니다.
+영역의  메모리가  512MiB를  초과하면  배치  크기가  증가하지  않습니다.  예를  들어  페이지  크기가  4,096KiB인
+시스템의  경우  페이지가  131,072개  이상이면  이  제한에  도달합니다.  그림  3-17은  영역에  존재하는  페이지  수에  따라  배치  크기가  어떻게  변화하는지  보여줍니다.
+배치  값은  배치가  캐시  제한을  계산하는  데  사용되는  방법을  고려할  때  의미가  있습니다.
 
+mm/page_alloc.c
+inline void setup_pageset(struct per_cpu_pageset *p, unsigned long batch)
+{
+struct per_cpu_pages *pcp;
+memset(p, 0, sizeof(*p));
+pcp = &p->pcp[0]; /* hot */
+pcp->count = 0;
+pcp->high = 6 * batch;
+pcp->batch = max(1UL, 1 * batch);
+INIT_LIST_HEAD(&pcp->list);
+pcp = &p->pcp[1]; /* cold*/
+pcp->count = 0;
+pcp->high = 2 * batch;
+pcp->batch = max(1UL, batch/2);
+INIT_LIST_HEAD(&pcp->list);
+}
 
+.. image:: ./img/fig3_17.png
 
+그림  3-17:  다양한  페이지  크기에  대해  영역에  존재하는  메모리  양(왼쪽)에  따라  달라지는  배치  크기.
+오른쪽  그래프는  영역에  있는  페이지  수에  대한  종속성을  보여줍니다.
+핫  페이지에  사용되는  하한은  0이고  상한은  6*배치  이므로  커널이  캐시를  너무  많이  소모하지  않도록  하기  때문에  캐시의  평균
+페이지  수는  약  4*배치  입니다.  그러나  배치*4는  전체  영역  페이지  수의  1/1000에  해당합니다.
+이는  zone_batchsize가  전체  페이지의  1/1000에  대해  배치  크기를
+25%로  최적화하려고  시도한  이유이기도  합니다.  IA-32  프로세서의  L2  캐시  크기는  0.25~2MiB  범위이므로  이  공간에  맞는
+것보다  더  많은  메모리를  핫  앤  콜드  캐시에  보관하는  것은  의미가  없습니다.  경험상  캐시  크기는  주  메모리  크기의  1/1000입니다.
+현재  시스템에는  CPU당  1~2GiB의  RAM이  장착되어  있으므로  규칙이  합리적이라는  점을  고려하세요.  따라서  계산된  배치  크기는
+핫  앤  콜드  캐시의  페이지가  CPU의  L2  캐시에  맞도록  허용할  가능성이  높습니다.
+캐시에  보관되지  않은  콜드  페이지는  성능에  중요  하지  않은  작업(물론  이러한  작업은  커널에서  소수임)에만  사용되기  때문에
+콜드  목록의  워터마크는  약간  낮습니다.
+배치  값  의  두  배만  상한값으로  사용됩니다.
+pcp-  >배치  크기는  목록을  다시  채워야  할  때  한  번에  사용되는  페이지  수를  결정합니다.
+성능상의  이유로  단일  페이지가  아닌  전체  페이지  청크가  목록에  추가됩니다.
+각  영역의  페이지  수는  부팅  로그에  표시된  대로  계산된  배치  크기와  함께
+zone_pcp_init  끝에  출력됩니다  (아래  예에서  RAM이  4GiB인  시스템의  경우).
+
+root@meitner # dmesg | grep LIFO
+DMA zone: 2530 pages, LIFO batch:0
+DMA32 zone: 833464 pages, LIFO batch:31
+Normal zone: 193920 pages, LIFO batch:31
+
+Registering Active Memory Regions
+------------------------------------
+
+위에서  구역  구조의  초기화는  광범위한  작업이라는  점을  언급했습니다.
+다행히  이  작업은  모든  아키텍처에서  동일합니다.  2.6.19  이전의  커널  버전은  아키텍처별로  필요한  데이터  구조를  설정해야  했지만
+그  동안  접근  방식은  더욱  모듈화되었습니다.  개별  아키텍처는  모든  활성  메모리  영역과  일반에  대한  매우  간단한  맵만  등록하면  됩니다.
+그런  다음  코드는  이  정보로부터  기본  데이터  구조를  생성합니다.
+개별  아키텍처는  커널에서  제공하는  일반  프레임워크에  의존하지  않고  자체적으로  모든  데이터  구조를  설정하기로  결정할  수  있습니다.
+IA-32와  AMD64  모두  커널이  어려운  작업을  수행하도록  하므로  이  가능성에  대해서는  더  이상  논의하지  않겠습니다.
+일반  프레임워크가  제공하는  가능성을  활용하려는  아키텍처는  ARCH_POPULATES_NODE_MAP  구성  옵션을  설정해야  합니다.
+모든  활성  메모리  영역이  등록된  후  나머지  작업은  일반  커널  코드에  의해  수행됩니다.
+활성  메모리  영역은  단순히  홀이  포함되지  않은  메모리  영역입니다.  전역  변수  early_node_map에  지역을  등록하려면
+add_active_range를  사용해야  합니다 .
+
+mm/page_alloc.c
+static struct node_active_region __meminitdata early_node_map[MAX_ACTIVE_REGIONS];
+static int __meminitdata nr_nodemap_entries;
+
+현재  등록된  지역의  수는  nr_nodemap_entries로  표시됩니다.
+개별  지역의  최대  수는  MAX_ACTIVE_REGIONS로  지정됩니다.
+값은  CONFIG_MAX_ACTIVE_REGIONS를  사용하여  아키텍처별  코드로  설정할  수  있습니다 .
+그렇지  않은  경우  커널은  기본적으로  256개의  활성  영역(또는  32개  이상의  노드가  있는  시스템에서  실행  중인
+경우  NUMA  노드당  50개의  영역)  등록을  허용합니다.  각  지역은  다음  데이터  구조로  설명됩니다.
+
+<mmzone.h>
+struct node_active_region {
+unsigned long start_pfn;
+unsigned long end_pfn;
+int nid;
+};
+start_pfn  과  end_pfn은  연속된  영역의  첫  번째와  마지막  페이지  프레임을  나타내며,
+nid  는  메모리가  속한  노드의  NUMA  ID입니다.  UMA  시스템은  자연스럽게  이를  0으로  설정합니다.
+활성  메모리  영역은  add_active_range에  등록됩니다.
+
+mm/page_alloc.c
+void __init add_active_range(unsigned int nid, unsigned long start_pfn,
+unsigned long end_pfn)
+
+인접한  두  지역이  등록되면  add_active_regions를  사용하여  두  지역이  하나로  병합되도록  합니다.
+게다가  이  기능은  전혀  놀라운  일이  아닙니다.
+그림  3-12  및  3-13에서  이  함수는  IA-32  시스템의  zone_sizes_init  와  AMD64  시스템의  e820_register_active_regions  에서
+호출된다는  점을  상기해  보세요 .
+따라서  이러한  기능에  대해  간략하게  설명하겠습니다.
+
+Registering Regions on IA-32
+------------------------------
 
 
 
