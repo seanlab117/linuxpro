@@ -1966,6 +1966,86 @@ unsigned long end_pfn)
 
 Registering Regions on IA-32
 ------------------------------
+add_active_range  호출  외에도  zone_sizes_init  함수는  페이지  프레임  측면에서  다양한  메모리  영역의  경계를  저장합니다.
+
+arch/x86/kernel/setup_32.c
+void __init zone_sizes_init(void)
+{
+unsigned long max_zone_pfns[MAX_NR_ZONES];
+memset(max_zone_pfns, 0, sizeof(max_zone_pfns));
+max_zone_pfns[ZONE_DMA] =
+virt_to_phys((char *)MAX_DMA_ADDRESS) >> PAGE_SHIFT;
+max_zone_pfns[ZONE_NORMAL] = max_low_pfn;
+#ifdef CONFIG_HIGHMEM
+max_zone_pfns[ZONE_HIGHMEM] = highend_pfn;
+add_active_range(0, 0, highend_pfn);
+#else
+add_active_range(0, 0, max_low_pfn);
+#endif
+free_area_init_nodes(max_zone_pfns);
+}
+
+
+MAX_DMA_ADDRESS는  DMA  작업에  가장  적합한  메모리  주소입니다.
+상수는  PAGE_OFFSET+0x1000000으로  선언됩니다.  물리적  페이지는  PAGE_OFFSET  부터  시작하여  가상  페이지에  매핑되며
+처음  16MiB(16진수  0x1000000 )가  DMA  작업에  적합하다는  점을  기억하세요.  virt_to_phys를  사용한  변환은  물리적
+메모리의  주소를  생성하고  PAGE_SHIFT  비트만큼  오른쪽으로  이동하면  이  수치를  페이지  크기로  효과적으로  나누고  DMA에
+사용할  수  있는  페이지  수를  생성합니다.  당연히  IA-32는  4KiB의  페이지를  사용하므로  결과는  4,096입니다.
+max_low_pfn  및  highend_pfn은  이전에  채워졌던  낮은(3:1  주소  공간  분할이  사용되는  경우  일반적으로  896MiB  이하)  및
+높은  메모리  범위에서  가장  높은  페이지  번호를  지정하는  전역  상수입니다.
+free_area_init_nodes  는  early_mem_map  과  max_zone_pfns  의  정보를  결합합니다 .
+각  메모리  영역의  활성  범위가  선택되고  아키텍처  독립적인  데이터  구조가  구성됩니다.
+
+
+Registering Regions on AMD64
+------------------------------
+
+사용  가능한  메모리  등록은  AMD64에서  두  가지  기능으로  분할됩니다.  활성  메모리  영역은  다음과  같이  등록됩니다.
+
+arch/x86/kernel/e820_64.c
+e820_register_active_regions(int nid, unsigned long start_pfn,
+unsigned long end_pfn)
+{
+unsigned long ei_startpfn;
+unsigned long ei_endpfn;
+int i;
+
+for (i = 0; i < e820.nr_map; i++)
+if (e820_find_active_region(&e820.map[i],
+start_pfn, end_pfn,
+&ei_startpfn, &ei_endpfn))
+add_active_range(nid, ei_startpfn, ei_endpfn);
+}
+
+기본적으로  코드는  BIOS에서  제공하는  모든  지역을  반복하고  각  항목에  대한  활성  지역을  찾습니다.
+이는  IA-32  변형과  달리  add_active_range가  여러  번  호출될  수  있다는  점에서  흥미롭습니다.
+max_zone_pfns  채우기는  paging_init  에  의해  처리됩니다 .
+
+
+arch/x86/mm/init_64.c
+void __init paging_init(void)
+{
+unsigned long max_zone_pfns[MAX_NR_ZONES];
+memset(max_zone_pfns, 0, sizeof(max_zone_pfns));
+max_zone_pfns[ZONE_DMA] = MAX_DMA_PFN;
+max_zone_pfns[ZONE_DMA32] = MAX_DMA32_PFN;
+max_zone_pfns[ZONE_NORMAL] = end_pfn;
+...
+free_area_init_nodes(max_zone_pfns);
+}
+
+16비트  및  32비트  DMA  영역에  대한  페이지  프레임  경계는  16MiB  및  4GiB  범위를  페이지  프레임으로  변환하는  전처리기  기호에  저장됩니다.
+include/asm-x86/dms_64.h
+/* 16MB ISA DMA zone */
+#define MAX_DMA_PFN ((16*1024*1024) >> PAGE_SHIFT)
+/* 4GB broken PCI/AGP hardware bus master zone */
+#define MAX_DMA32_PFN ((4UL*1024*1024*1024) >> PAGE_SHIFT)
+
+end_pfn은  감지된  가장  큰  페이지  프레임  번호입니다.
+AMD64에는  높은  메모리가  필요하지  않으므로  max_zone_pfns  의  해당  항목은  NULL  로  유지됩니다 .
+
+
+
 
 
 
