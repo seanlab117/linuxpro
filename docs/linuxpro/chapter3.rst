@@ -1158,6 +1158,124 @@ void do_work() {
 동시에  활성화될  수  없기  때문에  두  구현  모두에  동일한  이름이  사용된다는  점에  유의하세요.
 적절한  함수를  호출하는  것은  이제  일반  함수를  호출하는  것보다  더  복잡하지  않습니다.
 
+void do_something() {
+...
+do_work(); /* Work hard or not, depending on configuration /*
+...
+}
+분명히  이  변형은  훨씬  더  읽기  쉽고  커널  개발자가  항상  선호합니다(사실  첫  번째  스타일을  사용하는  패치는  메인라인  커널에  진입하는
+데  매우  어려움을  겪을  것입니다).
+구역  목록  설정으로  돌아가  보겠습니다.  현재  우리가  관심을  갖고  있는  build_all_zonelists  부분
+(페이지  할당자에  대한  페이지  그룹  이동성  확장을  위해  수행할  작업이  더  있지만  이에  대해서는  아래에서  별도로  논의하겠습니다)
+은  모든  작업을  __build_all_zonelists에  위임  합니다 .  시스템의  각  NUMA  노드에  대한  build_zonelists .
+
+mm/page_alloc.c
+static int __build_all_zonelists(void *dummy)
+{
+int nid;
+for_each_online_node(nid) {
+pg_data_t *pgdat = NODE_DATA(nid);
+build_zonelists(pgdat);
+...
+}
+return 0;
+}
+
+for_each_online_node는  시스템의  모든  활성  노드를  반복합니다.  UMA  시스템에는  노드가  하나만  있으므로  build_zonelists는
+전체  메모리에  대한  영역  목록을  생성하기  위해  한  번만  호출됩니다.
+NUMA  시스템은  노드  수만큼  함수를  호출해야  합니다.  각  호출은  서로  다른  노드에  대한  영역  데이터를  생성합니다.
+build_zonelists는  노드  메모리  구성에  대한  모든  기존  정보를  포함하고  새로  생성된  데이터  구조를  보유하는
+pgdat_t  인스턴스  에  대한  포인터를  매개변수로  기대합니다 .
+
+UMA  시스템에서  NODE_DATA는  contig_page_data  의  주소를  반환합니다 .
+
+이  기능의  임무는  현재  처리  중인  노드  영역과  시스템의  다른  노드  사이에  순위  순서를  설정하는  것입니다.
+그런  다음  이  순서에  따라  메모리가  할당됩니다.  원하는  노드  영역에  사용  가능한  메모리가  없는  경우  이는  중요합니다.
+커널이  높은  메모리를  할당하려는  예를  살펴보겠습니다.  먼저  현재  노드의  highmem  영역에서  적절한  크기의  여유  세그먼트를  찾으려고  시도합니다.
+실패하면  노드의  일반  메모리  영역을  살펴봅니다.
+이것도  실패하면  노드의  DMA  영역에서  할당을  시도합니다.  세  개의  로컬  영역  중  어느  곳에서도  여유  공간을  찾을  수  없으면
+다른  노드를  찾습니다.  이  경우  대체  노드는  기본  노드와  최대한  가까워야  비로컬  메모리  액세스로  인한  성능  손실을  최소화할  수  있습니다.
+커널은  메모리  계층  구조를  정의하고  먼저  '저렴한'  메모리  할당을  시도합니다.  이것이  실패하면  점차적으로  액세스  및  용량  측면에서
+'더  비용이  많이  드는'  메모리  할당을  시도합니다.
+높은  메모리(highmem)  범위는  커널의  어떤  부분도  이  영역에서  할당된  메모리에  의존하지  않기  때문에  가장  저렴합니다.
+highmem  영역이  가득  차면  커널에  부정적인  영향이  없습니다.  이것이  바로  highmem  영역이  먼저  채워지는  이유입니다.
+일반  메모리의  상황은  다릅니다.  많은  커널  데이터  구조가  이  영역에  보관되어야  하며  highmem에  보관할  수  없습니다.
+따라서  일반  메모리가  완전히  가득  차면  커널은  심각한  상황에  직면하게  됩니다.  결과적으로  덜  중요한  highmem  영역에
+사용  가능한  메모리가  없을  때까지  이  영역에서  메모리가  할당되지  않습니다.
+
+주변기기와  시스템  간의  데이터  전송에  사용되는  DMA  영역은  가장  비용이  많이  드는  영역입니다.
+따라서  이  영역의  메모리  할당은  최후의  수단입니다.
+또한  커널은  현재  메모리  노드에서  볼  수  있는  대체  노드  간의  순위  순서를  정의합니다.
+이는  현재  노드의  모든  영역이  가득  찼을  때  대체  노드를  결정하는  데  도움이  됩니다.
+커널은  설명된  계층  구조를  데이터  구조로  표현하기  위해  pg_data_t  의  zonelist  요소  배열을  사용합니다 .
+
+<mmzone.h>
+typedef struct pglist_data {
+...
+struct zonelist node_zonelists[MAX_ZONELISTS];
+...
+} pg_data_t;
+#define MAX_ZONES_PER_ZONELIST (MAX_NUMNODES * MAX_NR_ZONES)
+struct zonelist {
+...
+struct zone *zones[MAX_ZONES_PER_ZONELIST + 1]; // NULL delimited
+};
+
+node_zonelists  배열은  가능한  모든  영역  유형  에  대해  별도의  항목을  사용할  수  있도록  합니다.
+이  항목에는  구조가  아래에  설명되어  있는  zonelist  유형의  대체  목록이  포함되어  있습니다 .
+대체  목록은  모든  노드의  모든  영역을  포함해야  하기  때문에  MAX_NUMNODES  항목과  목록  끝을  표시하는
+null  포인터에  대한  추가  요소로  구성됩니다 .
+
+대체  계층  구조  생성  작업은  각  NUMA  노드에  대한  데이터  구조를  생성하는  build_zonelists  에  위임됩니다.
+관련  pg_data_t  인스턴스에  대한  포인터를  매개변수로  필요합니다.
+코드를  자세히  논의하기  전에  위에서  언급한  내용  중  하나를  상기해  보겠습니다.
+논의를  UMA  시스템으로  제한했는데  왜  여러  NUMA  노드를  고려해야  합니까?  실제로  아래  표시된  코드는  CONFIG_NUMA가  설정된  경우
+커널에  의해  다른  변형으로  대체됩니다 .
+그러나  아키텍처가  UMA  시스템에서  불연속  또는  희소  메모리  옵션을  선택할  수도  있습니다.
+이는  주소  공간에  큰  구멍이  있는  경우  유용할  수  있습니다.  이러한  구멍으로  인해  생성된  메모리  '블록'은  NUMA에서
+제공하는  데이터  구조를  사용하여  가장  잘  처리할  수  있습니다.  이것이  바로  우리가  여기서  그들을  다루어야  하는  이유입니다.
+대규모  외부  루프는  먼저  모든  노드  영역을  반복합니다.  각  루프  패스는  대체  목록이  보관되어  있는  zonelist
+배열  에서  i번째  영역  에  대한  영역  항목을  찾습니다 .
+
+mm/page_alloc.c
+static void __init build_zonelists(pg_data_t *pgdat)
+{
+int node, local_node;
+enum zone_type i,j;
+local_node = pgdat->node_id;
+for (i = 0; i < MAX_NR_ZONES; i++) {
+struct zonelist *zonelist;
+zonelist = pgdat->node_zonelists + i;
+j = build_zonelists_node(pgdat, zonelist, 0, j);
+...
+}
+
+node_zonelists  의  배열  요소는  C에서  완전히  합법적인  관행인  포인터  조작을  통해  처리됩니다.
+실제  작업은  build_zonelist_node에  위임됩니다.  호출되면  먼저  로컬  노드  내에서  대체  순서를  생성합니다.
+
+mm/page_alloc.c
+static int __init build_zonelists_node(pg_data_t *pgdat, struct zonelist *zonelist,
+int nr_zones, enum zone_type zone_type)
+{
+struct zone *zone;
+do {
+zone = pgdat->node_zones + zone_type;
+if (populated_zone(zone)) {
+zonelist->zones[nr_zones++] = zone;
+}
+zone_type--;
+} while (zone_type >= 0);
+return nr_zones;
+}
+
+
+
+
+
+
+
+
+
 
 
 Data Structures
