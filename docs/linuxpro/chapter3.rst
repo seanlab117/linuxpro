@@ -2895,6 +2895,47 @@ Managing Data Structure Creation
 
 .. image:: ./img/fig3_27.png
 
+free_area_init_nodes는  먼저  아키텍처별  코드에서  제공하는  정보를  분석하고  다시  작성해야  합니다.
+무엇보다도  zone_max_pfn  및  zone_min_pfn  에  지정된  기본  경계와  달리  사용할  수  있는  가장  낮은  페이지  프레임  수와
+가장  높은  페이지  프레임  수  를  각  영역에  대해  얻어야  합니다.  정보를  저장하는  데  두  개의  전역  배열이  사용됩니다.
+mm/page_alloc.c
+static unsigned long __meminitdata arch_zone_lowest_possible_pfn[MAX_NR_ZONES];
+static unsigned long __meminitdata arch_zone_highest_possible_pfn[MAX_NR_ZONES]
+
+그러나  우선  free_area_init_nodes는  early_node_map  의  항목을  첫  번째  페이지  프레임을  기준으로  정렬합니다.
+start_pfn.
+
+mm/page_alloc.c
+void __init free_area_init_nodes(unsigned long *max_zone_pfn)
+{
+unsigned long nid;
+enum zone_type i;
+/* Sort early_node_map as initialisation assumes it is sorted */
+sort_node_map();
+...
+
+항목을  정렬하면  다음  작업이  더  쉬워지지만  특별히  복잡하지는  않으므로  sort_node_map을  추가로  검사할  필요가  없습니다.
+커널은  함수에  사용되는  lib/sort.c  의  일반  힙  정렬  구현을  제공한다는  점에  유의하세요.
+max_zone_pfn  의  free_area_init_nodes  에  전달된  정보는  각  영역에  포함될  수  있는  최대  페이지  프레임  수를  기록합니다.
+free_area_init_nodes는  앞서  언급한  전역  변수의  각  영역에  대해  [low,  high]  형식의  페이지  프레임  간격을  제공하여  이  정보를
+보다  편리하게  표현하도록  준비합니다(0바이트로  이러한  변수의  초기화를  생략함).
+mm/page_alloc.c
+arch_zone_lowest_possible_pfn[0] = find_min_pfn_with_active_regions();
+arch_zone_highest_possible_pfn[0] = max_zone_pfn[0];
+for (i = 1; i < MAX_NR_ZONES; i++) {
+if (i == ZONE_MOVABLE)
+continue;
+arch_zone_lowest_possible_pfn[i] =
+arch_zone_highest_possible_pfn[i-1];
+arch_zone_highest_possible_pfn[i] =
+max(max_zone_pfn[i], arch_zone_lowest_possible_pfn[i]);
+}
+
+보조  함수  find_min_pfn_with_active_regions는  가장  낮은  등록  영역에  대해  등록된  가장  작은  사용
+가능한  페이지  프레임을  찾는  데  사용됩니다.
+이는  반드시  ZONE_DMA  일  필요는  없지만 ,  예를  들어  머신에  DMA  메모리가  필요하지  않은  경우  ZONE_NORMAL  일  수도  있습니다 .
+가장  작은  영역의  최대  페이지  프레임은  max_zone_pfn에서  제공하는  정보에서  직접  가져올  수  있습니다 .
+
 
 
 
