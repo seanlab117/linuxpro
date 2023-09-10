@@ -2751,6 +2751,150 @@ migrationtype  인수는  위에서  소개한  보조  함수  allocflags_to_  
 마지막으로,  마이그레이션  목록  전체에  걸친  페이지  배포의  현재  상태는 /proc/pagetypeinfo  에서  확인할  수  있습니다 .
 
 
+Wolfgang@meitner>  고양이
+/proc/pagetypeinfo페이지
+블록  순서:  9
+블록당  페이지:  512
+
+Free pages count per migrate type at order 0 1 2 3 4 5 6 7 8 9 10
+Node 0, zone DMA, type Unmovable 0 0 1 1 1 1 1 1 1 1 0
+Node 0, zone DMA, type Reclaimable 0 0 0 0 0 0 0 0 0 0 0
+Node 0, zone DMA, type Movable 3 5 6 3 5 2 2 2 0 0 0
+Node 0, zone DMA, type Reserve 0 0 0 0 0 0 0 0 0 0 1
+Node 0, zone DMA, type <NULL> 0 0 0 0 0 0 0 0 0 0 0
+Node 0, zone DMA32, type Unmovable 44 37 29 1 2 0 1 1 0 1 0
+Node 0, zone DMA32, type Reclaimable 18 29 3 4 1 0 0 0 1 1 0
+Node 0, zone DMA32, type Movable 0 0 191 111 68 26 21 13 7 1 500
+Node 0, zone DMA32, type Reserve 0 0 0 0 0 0 0 0 0 1 2
+Node 0, zone DMA32, type <NULL> 0 0 0 0 0 0 0 0 0 0 0
+Node 0, zone Normal, type Unmovable 1 5 1 0 0 0 0 0 0 0 0
+Node 0, zone Normal, type Reclaimable 0 0 0 0 0 0 0 0 0 0 0
+Node 0, zone Normal, type Movable 1 4 0 0 0 0 0 0 0 0 0
+Node 0, zone Normal, type Reserve 11 13 7 8 3 4 2 0 0 0 0
+Node 0, zone Normal, type <NULL> 0 0 0 0 0 0 0 0 0 0 0
+Number of blocks type Unmovable Reclaimable Movable Reserve <NULL>
+Node 0, zone DMA 1 0 6 1 0
+Node 0, zone DMA32 13 18 2005 4 0
+Node 0, zone Normal 22 10 351 1 0
+
+Initializing Mobility-Based Grouping
+--------------------------------------
+메모리  하위  시스템을  초기화하는  동안  memmap_init_zone은  페이지  처리를  담당합니다.메모리  영역의  인스턴스.
+이  함수는  별로  흥미롭지  않은  몇  가지  표준  초기화를  수행합니다.
+그러나  한  가지는  필수적입니다.  모든  페이지는  처음에  이동  가능하도록  표시되어  있습니다!
+
+mm/page_alloc.c
+void __meminit memmap_init_zone(unsigned long size, int nid, unsigned long zone,
+unsigned long start_pfn, enum memmap_context context)
+{
+struct page *page;
+unsigned long end_pfn = start_pfn + size;
+unsigned long pfn;
+for (pfn = start_pfn; pfn < end_pfn; pfn++) {
+...
+if ((pfn & (pageblock_nr_pages-1)))
+set_pageblock_migratetype(page, MIGRATE_MOVABLE);
+...
+}
+
+섹션  3.5.4에서  설명한  것처럼  커널은  페이지를  '도난'해야  할  때  큰  페이지  그룹을  선호합니다.
+할당하려는  영역과  다른  마이그레이션  영역.
+모든  페이지는  처음에이동  가능한  영역에서는  정기적이고  이동할  수  없는  커널  할당이  수행될  때  페이지를  훔쳐야  합니다.
+
+당연히  부팅  중에  이동  가능한  할당이  너무  많이  수행되지  않으므로  할당자가  최대  크기의  블록을  선택하여  이동  가능한  목록에서
+이동  불가능한  목록으로  전송할  가능성이  높습니다.
+블록의  크기가  최대이므로  이동  가능한  영역에  조각화가  발생하지  않습니다!
+전체적으로  이는  부팅  중에  수행되는(종종  전체  시스템  가동  시간  동안  지속되는)  커널  할당이  물리적  RAM에  분산되어  다른  할당
+유형이  단편화되는  상황을  방지합니다.
+이는  커널  할당의  가장  중요한  목표  중  하나입니다.  페이지  이동성  그룹화  프레임워크.
+
+The Virtual Movable Zone
+------------------------------
+
+이동  순서에  따라  페이지를  그룹화하는  것은  물리적  메모리의  조각화를  방지하는  한  가지  가능한  방법이지만  커널은
+이  문제를  해결하기  위한  또  다른  방법인  가상  영역  ZONE_MOVABLE을  추가로  제공합니다 .
+이  메커니즘은  이동성  그룹화  프레임워크가  병합되기  전  릴리스인  커널  2.6.23  개발  중에  커널에  도입되었습니다.
+이동성  그룹화와  달리  ZONE_MOVABLE  기능은  관리자가  명시적으로  활성화해야  합니다.
+기본  아이디어는  간단합니다.  사용  가능한  실제  메모리는  이동  가능한  할당에  사용되는  영역과  이동  불가능한  할당에  사용되는  영역으로  분할됩니다.
+이렇게  하면  이동  불가능한  페이지로  인해  이동  가능한  영역에  조각화가  발생하는  것을  자동으로  방지할  수  있습니다.
+이는  커널이  두  경쟁자  사이에  사용  가능한  메모리를  분배하는  방법을  어떻게  결정해야  하는지에  대한  의문을  즉시  제기합니다.
+분명히  이것은  열악한  커널에  너무  많은  것을  요구하므로  시스템  관리자가  결정을  내려야  합니다.
+결국,  인간은  기계가  어떤  시나리오를  처리할지,  그리고  다양한  유형에  대한  예상  할당  분포가  무엇인지  훨씬  더  잘  예측할  수  있습니다.
+
+
+Data Structures
+-------------------
+kernelcore  매개변수를  사용하면  이동  불가능한  할당,  즉  회수나  마이그레이션이  불가능한  할당에  사용  되는  메모리  양을  지정할  수  있습니다.
+남은  메모리는  이동  가능한  할당에  사용됩니다.  매개변수를  구문  분석한  후  결과는  전역  변수  필수_kernelcore에  저장됩니다.
+이동식  메모리에  사용되는  메모리  양을  제어하기  위해  movablecore  매개변수를  사용하는  것도  가능합니다 .
+이에  따라  필수_kernelcore  의  크기가  계산됩니다.
+두  매개변수를  동시에  지정하면  커널은  이전과  같이  필수_kernelcore를  계산하고  계산된  값과  지정된  값  중  더  큰  값을  사용합니다.
+아키텍처  및  커널  구성에  따라  새  영역  ZONE_MOVABLE은  고성능  메모리  또는  일반  메모리  영역  위에  위치합니다.
+
+<mmzone.h>
+enum zone_type {
+...
+ZONE_NORMAL
+#ifdef CONFIG_HIGHMEM
+ZONE_HIGHMEM,
+#endif
+ZONE_MOVABLE,
+MAX_NR_ZONES
+};
+
+시스템의  다른  모든  영역과  달리  ZONE_MOVABLE은  하드웨어에  중요한  메모리  범위와  연관되지  않습니다.
+실제로  영역은  highmem  또는  일반  영역에서  가져온  메모리로  채워져  있으므로  다음에서는  ZONE_MOVABLE을  가상  영역  이라고  부릅니다 .
+보조  함수  find_zone_movable_pfns_for_nodes는  ZONE_MOVABLE  에  들어가는  메모리  양을  계산하는  데  사용됩니다 .
+kernelcore  와  movablecore  매개변수가  모두  지정되지  않은  경우
+find_zone_movable_pfns_for_nodes는  ZONE_MOVABLE을  비워  두고  메커니즘이  활성화되지  않습니다.
+물리적  영역에서  가져와  ZONE_MOVABLE에  사용되는  페이지  수와  관련하여  두  가지  사항을  고려해야  합니다
+
+이동  불가능한  할당을  위한  메모리는  모든  메모리  노드에  균등하게  분산됩니다.
+􀀁  가장  높은  영역의  메모리만  사용됩니다.  메모리가  많은  32비트  시스템에서는  일반적으로  ZONE_HIGHMEM  이  사용되지만 ,  64비트  시스템에서는
+ZONE_NORMAL  또는  ZONE_DMA32가  사용됩니다.
+
+실제  계산은  다소  길지만  그다지  흥미롭지는  않으므로  자세히  고려하지는  않습니다.  중요한  것은  결과입니다.
+
+가상  영역  ZONE_MOVABLE  에  대한  페이지를  가져오는  물리적  영역은 전역  변수  movable_zone.
+
+각 노드에  대해  이후  메모리가  속한  이동  가능  영역의  페이지  프레임 ZONE_MOVABLE은  zone_movable_pfn[node_id]  에  있습니다 .
+
+mm/page_alloc.c
+unsigned long __meminitdata zone_movable_pfn[MAX_NUMNODES];
+
+커널은  이러한  페이지가  다음의  책임에  속하는  할당을  충족하는  데  사용되도록  보장합니다.ZONE_MOVABLE.
+
+Implementation
+-------------------
+
+지금까지  설명한  데이터  구조는  어떻게  사용됩니까?  페이지  마이그레이션  접근  방식과  마찬가지로  할당  플래그는  중요한  역할을  합니다.
+이에  대해서는  아래  섹션  3.5.4에서  더  자세히  논의됩니다.
+여기서는  모든  이동  가능한  할당이  __GFP_HIGHMEM  및  __GFP_MOVABLE  을  모두  지정해야  한다고만  말하면  충분합니다 .
+커널은  할당  플래그에  의해  할당이  충족되는  영역을  결정하므로  해당  플래그가  설정되면  ZONE_MOVABLE을  선택할  수  있습니다.
+이는  ZONE_MOVABLE을  버디  시스템에  통합하는  데  필요한  유일한  변경  사항입니다 !
+나머지는  아래에서  설명하는  모든  영역에서  작동하는  일반  루틴에  의해  수행됩니다.
+
+
+3.5.3 Initializing the Zone and Node Data Structures
+--------------------------------------------------------
+
+지금까지  우리는  커널이  아키텍처별  코드에서  시스템의  사용  가능한  메모리를  감지하는  방법만  살펴보았습니다.
+더  높은  수준의  구조(영역  및  노드)와의  연결은  다음을  수행해야  합니다.
+
+이  정보를  바탕으로  구성됩니다.  부팅  중에  다음  정보를  설정하려면  아키텍처가  필요하다는  점을  기억하세요.
+
+max_zone_pfn  에  저장된  시스템  내  다양한  영역의  페이지  프레임  경계
+정렬.
+􀀁  전역  변수  early_node_map에  저장된  노드  전체의  페이지  프레임  분포입니다 .
+
+Managing Data Structure Creation
+-----------------------------------
+
+커널  2.6.10부터  이  정보를  버디  시스템이  예상하는  노드  및  영역  데이터  구조로  전송하기  위한  일반  프레임워크가  제공되었습니다.  이전에는  각  아키텍처가  자체적으로  구조를  설정해야  했습니다.  오늘은  앞서  언급한  간단한  구조를  설정하고  어려운  작업을  free_area_init_nodes에  맡기는  것으로  충분합니다.
+그림  3-27은  프로세스  개요를  보여주고,  그림  3-28은  free_area_init_nodes에  대한  코드  흐름도를  보여줍니다.
+
+
+
 
 
 Creating and Manipulating Entries
