@@ -3062,45 +3062,143 @@ check_for_regular_memory(pgdat);
 에서  이  정보를  추출합니다 .
 
 
+node_present_pages  필드  에  표시된  대로  노드에  메모리가  장착되어  있으면  N_HIGH_MEMORY  플래그  를  설정하여  노드  비트맵에  반영됩니다 .
+섹션  3.2.2에서  플래그(이름에도  불구하고)는  노드에  일반  또는  높은  메모리가  있음을  알리는  신호일  뿐이므로  check_for_regular_memory  는
+ZONE_HIGHMEM  아래  영역의  페이지가  있는지  확인  하고  이에  따라  노드  비트맵에  N_NORMAL_MEMORY  플래그를  설정합니다.
 
-Creating and Manipulating Entries
------------------------------------
 
 
-3.3 Initialization ofMemoryManagement
+Creating Data Structures for Each Node
+------------------------------------------
+영역  경계가  결정되면  free_area_init_nodes는  free_area_init_node를  호출하여  반복적으로  개별  영역에  대한  데이터  구조를  생성합니다 .
+이  목적을  위해서는  몇  가지  도우미  기능이  필요합니다.
+Calculate_node_totalpages는  먼저  개별  영역의  페이지를  합산하여  노드의  총  페이지  수를  계산합니다.
+연속  메모리의  경우  zones_size_init  에서  이를  수행할  수  있지만 ,  calculate_zone_totalpages는  영역의  홀도  고려합니다.
+각  노드에서  발견된  페이지  수는  시스템이  부팅될  때  짧은  메시지로  출력됩니다.  아래  예는  RAM이  512MiB인  UMA  시스템에서
+가져온  것입니다.
+
+wolfgang@meitner> dmesg
+...
+On node 0 totalpages: 131056
+...
+
+alloc_node_mem_map은  간단하지만  매우  중요한  데이터  구조를  초기화하는  역할을  합니다.
+위에서  언급한  것처럼  시스템의  모든  물리적  메모리  페이지에  대한  구조체  페이지  인스턴스가  있습니다 .
+이  구조의  초기화는  alloc_node_mem_map에  의해  수행됩니다 .
+
+mm/page_alloc.c
+static void __init_refok alloc_node_mem_map(struct pglist_data *pgdat)
+{
+/* Skip empty nodes */
+if (!pgdat->node_spanned_pages)
+return;
+if (!pgdat->node_mem_map) {
+unsigned long size, start, end;
+struct page *map;
+start = pgdat->node_start_pfn & ~(MAX_ORDER_NR_PAGES - 1);
+end = pgdat->node_start_pfn + pgdat->node_spanned_pages;
+end = ALIGN(end, MAX_ORDER_NR_PAGES);
+size = (end - start) * sizeof(struct page);
+map = alloc_remap(pgdat->node_id, size);
+if (!map)
+map = alloc_bootmem_node(pgdat, size);
+pgdat->node_mem_map = map + (pgdat->node_start_pfn - start);
+}
+if (pgdat == NODE_DATA(0))
+mem_map = NODE_DATA(0)->node_mem_map;
+}
+
+페이지가  없는  빈  노드는  당연히  건너뛸  수  있습니다.  아키텍처별  코드로  메모리  맵이  아직  설정되지  않은  경우(예:  IA-64  시스템에서  발생할  수  있음)
+노드와  연결된  구조체  페이지  의  모든  인스턴스에  필요한  메모리를  할당해야  합니다.
+개별  아키텍처는  이러한  목적을  위해  특정  기능을  제공할  수  있습니다.
+그러나  이는  현재  메모리  구성이  불연속적인  IA-32의  경우에만  해당됩니다.  다른  모
+든  구성에서는  일반  부팅  메모리  할당자가  할당을  수행하는  데  사용됩니다.
+모든  계산이  제대로  작동하려면  코드가  메모리  맵을  버디  시스템의  최대  할당  순서에  맞춰  정렬합니다.
+이  공간에  대한  포인터는  pglist_data  인스턴스뿐만  아니라  전역  변수  mem_map  에도  보관  됩니다.
+방금  검사한  노드가  시스템의  0번째  노드인  경우(항상  메모리  노드가  하나만  있는  시스템의  경우)입니다.
+mem_map  은  메모리  관리에  대한  설명에서  자주  접하게  될  전역  배열입니다.
+
+mm/memory.c
+struct page *mem_map;
+
+영역  데이터  구조의  초기화와  관련된  무거운  작업  은  노드의  모든  영역을  차례로  반복하는  free_area_init_core  에  의해  수행됩니다 .
+
+mm/page_alloc.c
+static void __init free_area_init_core(struct pglist_data *pgdat,
+unsigned long *zones_size, unsigned long *zholes_size)
+{
+enum zone_type j;
+int nid = pgdat->node_id;
+unsigned long zone_start_pfn = pgdat->node_start_pfn;
+...
+for (j = 0; j < MAX_NR_ZONES; j++) {
+struct zone *zone = pgdat->node_zones + j;
+unsigned long size, realsize, memmap_pages;
+size = zone_spanned_pages_in_node(nid, j, zones_size);
+realsize = size - zone_absent_pages_in_node(nid, j,
+zholes_size);
+...
+
+
+영역의  실제  크기는  스팬된  페이지  수를  구멍  수로  수정하여  얻습니다.
+두  수량  모두  두  개의  도우미  함수에  의해  계산되므로  더  자세히  논의하지는  않겠습니다.
+그  복잡성은  당연히  선택한  메모리  모델과  구성  옵션에  따라  다르지만  궁극적으로  모든  변형은  예상치  못한  놀라움을  제공하지  않습니다.
+
+mm/page_alloc.c
+...
+if (!is_highmem_idx(j))
+nr_kernel_pages += realsize;
+nr_all_pages += realsize;
+zone->spanned_pages = size;
+zone->present_pages = realsize;
+...
+zone->name = zone_names[j];
+...
+zone->zone_pgdat = pgdat;
+
+/* Initialize zone fields to default values,
+* and call helper functions */
+...
+}
+
+커널은  두  개의  전역  변수를  사용하여  시스템에  존재하는  페이지  수를  추적합니다.
+nr_kernel_pages는  모든  ID  매핑  페이지를  계산하는  반면  nr_all_pages  는  높은  메모리  페이지도  포함합니다.
+
+free_area_init_core  의  나머지  부분의  작업은  영역  구조  의  목록  헤드를  초기화  하고  다양한  구조  멤버를  0으로  초기화하는  것입니다.
+특히  흥미로운  것은  호출되는  두  가지  도우미  함수입니다.
+
+ zone_pcp_init는  다음  섹션에서  광범위하게  설명하는  것처럼  영역에  대한  CPU별  캐시를  초기화합니다.
+
+
+ it_currently_empty_zone은  free_area  목록을  초기화  하고  해당  영역에  속한  페이지의  모든  페이지  인스턴스를  초기  기본값으로  설정
+ 합니다.  위에서  설명한  memmap_init_zone은  영역의  페이지를  초기화하기  위해  호출됩니다.  또한  처음에는  모든  페이지가  MIGRATE_MOVABLE  에  귀속된다는  점을  기억하세요 .
+ 또한  무료  목록은  zone_init_free_lists에서  초기화됩니다.
+    mm/page_alloc.c
+    static void __meminit zone_init_free_lists(struct pglist_data *pgdat,
+    struct zone *zone, unsigned long size)
+    {
+    int order, t;
+    for_each_migratetype_order(order, t) {
+    INIT_LIST_HEAD(&zone->free_area[order].free_list[t]);
+    zone->free_area[order].nr_free = 0;
+    }
+}
+
+용  가능한  페이지  수  (nr_free)  는  현재  여전히  0으로  정의되어  있으며  이는  분명히  실제  상황을  반영하지  않습니다.
+bootmem  할당자가  비활성화되고  정상적인  버디  할당이  적용될  때까지  올바른  값이  설정되지  않습니다.
+
+3.5.4 Allocator API
 =======================================
 
-
-Data Structure Setup
-----------------------
-
-
-
-Architecture-Specific Setup
-----------------------------
+버디  시스템에  대한  인터페이스에  관한  한  NUMA  또는  UMA  아키텍처가  사용되는지  여부는  호출  구문이  둘  다  동일하기  때문에  차이가  없습니다.
+모든  함수의  공통점은  페이지가  2의  정수  거듭제곱으로만  할당될  수  있다는  사실입니다.
+이러한  이유로  원하는  메모리  크기는  C  표준  라이브러리의  malloc  함수나  bootmem  할당자에서처럼  매개변수로  지정되지  않습니다 . .
+대신  할당  순서를  지정해야  하며  이로  인해  버디  시스템이
+버디  시스템을  기반으로  하는  슬랩  할당자(또는  슬러브  또는  슬롭  할당자)의  구성입니다(자세한  내용은  섹션  3.6  참조)
 
 
-3.4 Memory Management during the Boot Process
-================================================
-
-
-
-3.5 Management of Physical Memory
-================================
-
-
-
-Structure of the Buddy System
---------------------------------
-
-
-Avoiding Fragmentation
----------------------------
-
-
-Initializing the Zone and Node Data Structures
-------------------------------------------------
-
+oc_pages(mask,  order)는  2차  페이지를  할당  하고  예약된  블록의  시작을  나타내는  구조체  페이지  의  인스턴스를  반환합니다 .
+alloc_page(mask)는  한  페이지만  요청한  경우  order  =  0  에  대한  더  짧은  표기법입니다 .
 
 Allocator API
 ------------------
