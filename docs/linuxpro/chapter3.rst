@@ -3202,10 +3202,269 @@ alloc_page(mask)는  한  페이지만  요청한  경우  order  =  0  에  대
 
 Allocator API
 ------------------
+버디  시스템에  대한  인터페이스에  관한  한  NUMA  또는  UMA  아키텍처가  사용되는지  여부는  호출  구문이  둘  다  동일하기  때문에  차이가  없습니다.
+모든  함수의  공통점은  페이지가  2의  정수  거듭제곱으로만  할당될  수  있다는  사실입니다.
+이러한  이유로  원하는  메모리  크기는  C  표준  라이브러리의  malloc  함수나  bootmem  할당자에서처럼  매개변수로  지정되지  않습니다 . .
+대신  할당  순서를  지정해야  하며  이로  인해  버디  시스템이 디  시스템을  기반으로  하는  슬랩  할당자(또는  슬러브  또는  슬롭  할당자)의  구성입니다(자세한  내용은  섹션  3.6  참조).
+alloc_pages(mask,  order)는  2차  페이지를  할당  하고  예약된  블록의  시작을  나타내는  구조체  페이지  의  인스턴스를  반환합니다 .
+alloc_page(mask)는  한  페이지만  요청한  경우  order  =  0  에  대한  더  짧은  표기법입니다 .
+
+get_zeroed_page(mask)는  페이지를  할당하고  페이지  인스턴스를  반환하지만  페이지를  0으로  채웁니다(다른  모든
+함수의  경우  페이지  내용은  할당  후에  정의되지  않습니다).  􀀁  __get_free_pages(mask,order)  및  __get_free_page(mask)  는  __get_free_pages(mask)
+와  동일한  방식으로  작동합니다. 위의  함수는  페이지  인스턴스  대신  예약된  메모리  청크의  가상  주소를  반환합니다 .
+
+  get_dma_pages(gfp_mask,order)를  사용하면  DMA에  적합한  페이지를  얻을  수  있습니다.
+
+요청을  충족할  수  있는  메모리가  부족하여  할당이  실패하는  경우  위의  모든  함수는  null  포인터  (alloc_pages  및  alloc_page)
+또는  값  0  (get_zeroed_page,  __get_free_pages  및  __get_free_page)을  반환합니다.  따라서  커널은  모든  할당  시도  후에  반환된
+결과를  확인해야  합니다 .
+이  관행은  잘  설계된  사용자  영역  응용  프로그램과  다르지  않지만  커널에서  검사를  무시하면  훨씬  더  심각한  오류가  발생합니다.
+커널은  버디  시스템  기능  외에도  다른  메모리  관리  기능을  제공합니다.
+이는  버디  시스템의  기초로  사용되지만  버디  할당자  자체에는  속하지  않는  레이어를  기반으로  구축됩니다.
+이러한  함수는  vmalloc  및  vmalloc_32  이며  페이지  테이블을  사용하여  연속되지  않은  메모리를  커널  주소  공간에  매핑하여  연속된  것처럼
+보이도록  합니다.
+전체  페이지보다  작은  메모리  영역을  예약하는  kmalloc  유형  의  함수  세트도  있습니다 .
+구현에  대해서는  이  장의  뒷부분에서  별도로  설명합니다.
+
+메모리에  더  이상  필요하지  않은  페이지를  커널에  반환하기  위해  약간  다른  네  가지  함수가  정의됩니다.
+free_page(struct  page*)  및  free_pages(struct  page*,  order)는  메모리  관리에  1~  2차  페이지를  반환합니다.
+메모리  영역의  시작은  해당  영역의  첫  번째  페이지  인스턴스  에  대한  포인터를  통해  표시됩니다 .
+free_page(addr) ,  __free_pages(addr,  order)는  방금  언급한  함수와  동일한  방식으로  동작하지만 ,  반환할  메모
+리  영역을  선택하기  위해  페이지  인스턴스  대신  가상  메모리  주소를  사용합니다 .
+
+AllocationMasks
+-----------------------
+모든  기능에  필수인  마스크  매개변수  의  의미는  무엇입니까 ?  섹션  3.2.1에서  알  수  있듯이  Linux는  메모리를  영역으로  나눕니다.
+커널은  메모리  할당을  위해  페이지를  가져올  영역을  지정하기  위해  영역  수정자  (마스크의  최하위  4비트에  정의됨)를  제공합니다.
+<gfp.h>
+/* Zone modifiers in GFP_ZONEMASK (see linux/mmzone.h - low three bits) */
+#define __GFP_DMA ((__force gfp_t)0x01u)
+#define __GFP_HIGHMEM ((__force gfp_t)0x02u)
+#define __GFP_DMA32 ((__force gfp_t)0x04u)
+...
+#define __GFP_MOVABLE ((__force gfp_t)0x100000u) /* Page is movable */
+
+이러한  상수는  대체  목록  생성에  대해  설명하는  섹션  3.4.1에서  익숙합니다.  약어  GFP는  무료  페이지  확보를  의미합니다 .
+__GFP_MOVABLE은  물리적  메모리  영역을  나타내지는  않지만  특수  가상  영역  ZONE_MOVABLE에서  할당이  이행되어야  함을  커널에  지시합니다.
+
+흥미롭게도  할당의  주요  부담은  이  영역에  있지만  __GFP_NORMAL  상수는  없습니다 .
+커널은  주어진  할당  플래그와  호환되는  가장  높은  메모리  영역을  계산하는  함수를  제공하여  이  사실을  고려합니다.
+그러면  이  영역과  그  아래  영역에서  할당이  이루어질  수  있습니다.
+mm/page_alloc.c
+static inline enum zone_type gfp_zone(gfp_t flags)
+{
+#ifdef CONFIG_ZONE_DMA
+if (flags & __GFP_DMA)
+return ZONE_DMA;
+#endif
+#ifdef CONFIG_ZONE_DMA32
+if (flags & __GFP_DMA32)
+return ZONE_DMA32;
+#endif
+if ((flags & (__GFP_HIGHMEM | __GFP_MOVABLE)) ==
+(__GFP_HIGHMEM | __GFP_MOVABLE))
+return ZONE_MOVABLE;
+#ifdef CONFIG_HIGHMEM
+if (flags & __GFP_HIGHMEM)
+return ZONE_HIGHMEM;
+#endif
+return ZONE_NORMAL;
+}
+영역  수정자가  해석되는  방식이  즉시  직관적으로  나타나지  않을  수  있으므로  표  3-7은  DMA  및  DMA32의  영역이  동일한  경우  함수  결과의
+예를  보여줍니다.
+__GFP_MOVABLE  수정자가  다음에  설정되어  있지  않다고  가정합니다 .
+__GFP_DMA  및  __GFP_HIGHMEM이  모두  설정되지  않은  경우  ZONE_NORMAL이  먼저  검색되고  그  다음  ZONE_DMA가  검색됩니다.
+__GFP_HIGHMEM이  설정되고  __GFP_DMA가  설정되지  않은  경우  결과적으로  ZONE_HIGHMEM부터  시작하여  세  영역이  모두  스캔됩니다.
+__GFP_DMA가  설정된  경우  __GFP_HIGHMEM  설정  여부는  커널과  관련이  없습니다 .  두  경우  모두  ZONE_DMA  만  사용됩니다.
+__GFP_HIGHMEM  과  __GFP_DMA  를  동시에  사용하는  것은  의미가  없기  때문에  이는  합리적입
+니다 .  Highmem은  결코  DMA에  적합하지  않습니다.
+
+.. image:: ./img/table3_7.png
 
 
-Reserving Pages
----------------------
+__GFP_MOVABLE  설정은  __GFP_HIGHMEM  과  함께  지정되지  않는  한  커널의  결정에  영향을  미치지  않습니다 .
+이  경우  메모리  요청을  충족하기  위해  특수  가상  영역  ZONE_MOVABLE이  사용됩니다.
+이  동작은  설명된  대로  커널의  조각화  방지  전략에  필수적입니다.
+영역  수정자  외에  몇  가지  플래그를  마스크에  설정할  수  있습니다.
+그림  3-29는  마스크의  레이아웃과  비트  위치와  관련된  상수를  보여줍니다.
+__GFP_DMA32는  다른  위치에  있을  수  있으므로  여러  번  나타납니다.
+
+
+.. image:: ./img/fig3_29.png
+
+영역  수정자와  달리  추가  플래그는  메모리를  할당할  수  있는  RAM  세그먼트를  제한  하지  않지만  할당자의  동작을  변경합니다.
+예를  들어,  여유  메모리에  대한  검색이  얼마나  적극적으로  수행되는지  수정합니다.  다음  플래그는  커널에  정의되어  있습니다.
+
+<gfp.h>
+/* Action modifiers - doesn’t change the zoning */
+#define __GFP_WAIT ((__force gfp_t)0x10u) /* Can wait and reschedule? */
+#define __GFP_HIGH ((__force gfp_t)0x20u) /* Should access emergency pools? */
+#define __GFP_IO ((__force gfp_t)0x40u) /* Can start physical IO? */
+#define __GFP_FS ((__force gfp_t)0x80u) /* Can call down to low-level FS? */
+#define __GFP_COLD ((__force gfp_t)0x100u) /* Cache-cold page required */
+#define __GFP_NOWARN ((__force gfp_t)0x200u) /* Suppress page allocation failure warning */
+#define __GFP_REPEAT ((__force gfp_t)0x400u) /* Retry the allocation. Might fail */
+#define __GFP_NOFAIL ((__force gfp_t)0x800u) /* Retry for ever. Cannot fail */
+#define __GFP_NORETRY ((__force gfp_t)0x1000u)/* Do not retry. Might fail */
+#define __GFP_NO_GROW ((__force gfp_t)0x2000u)/* Slab internal usage */
+#define __GFP_COMP ((__force gfp_t)0x4000u)/* Add compound page metadata */
+#define __GFP_ZERO ((__force gfp_t)0x8000u)/* Return zeroed page on success */
+#define __GFP_NOMEMALLOC ((__force gfp_t)0x10000u) /* Don’t use emergency reserves */
+#define __GFP_HARDWALL ((__force gfp_t)0x20000u) /* Enforce hardwall cpuset memory allocs */
+#define __GFP_THISNODE ((__force gfp_t)0x40000u)/* No fallback, no policies */
+#define __GFP_RECLAIMABLE ((__force gfp_t)0x80000u) /* Page is reclaimable */
+#define __GFP_MOVABLE ((__force gfp_t)0x100000u) /* Page is movable */
+
+
+표시된  상수  중  일부는  드문  경우에만  사용되므로  이에  대해서는  논의하지  않겠습니다.
+가장  중요한  상수의  의미는  다음과  같습니다.
+
+__GFP_WAIT는  메모리  요청이  중단될  수  있음을  나타냅니다.  즉,  스케줄러는  요청  중에  다른  프로세스를  자유롭게  선택할  수  있으
+며,  그렇지  않으면  더  중요한  이벤트로  인해  요청이  중단될  수  있습니다.
+할당자는  메모리가  반환되기  전에  큐에서  이벤트를  기다리는  것(그리고  프로세스를  절전  모드로  전환하는  것)도  허용됩니다.
+
+__GFP_HIGH  는  요청이  매우  중요한  경우,  즉  커널에  긴급하게  메모리가  필요한  경우  설정됩니다.  이  플래그는  메모리  할당  실패가
+커널에  큰  영향을  미쳐  시스템  안정성에  위협이  되거나  심지어  시스템  충돌까지  초래할  수  있는  경우  항상  사용됩니다.
+
+이름의  유사성에도  불구하고  __GFP_HIGH는  __GFP_HIGHMEM  과  아무  관련이  없으므로  혼동해서는  안  됩니다.
+
+__GFP_IO는  커널이  새로운  메모리를  찾으려고  시도하는  동안  I/O  작업을  수행할  수  있음을  지정합니다.  실제로  이는  커널이  메모
+리  할당  중에  페이지를  교체하기  시작하면  이  플래그가  설정된  경우에만  선택한  페이지가  하드  디스크에  기록될  수  있음을  의미합니다.
+􀀁  __GFP_FS를  사용하면  커널이  VFS  작업을  수행할  수  있습니다.  이러한  종류의  상호  작용으로
+인해  끝없는  재귀  호출이  발생할  수  있으므로  VFS  계층과  연결된  커널  계층에서는  이를  방지해야  합니다.  􀀁  __GFP_COLD는  CPU  캐
+시에  상주  하지  않는  '콜드'  페이지  할당이  필요한  경우  설정됩니다 .  􀀁  __GFP_NOWARN은  할당이  실패할  경우  커널  실패  경
+고를  표시하지  않습니다.  오카가  거의  없어요
+이  플래그가  유용할  때  유용합니다. 􀀁  __GFP_REPEAT는  실패한  할당을  자동으로  다시  시도하지만  몇  번  시도한  후에는  중지됩니다.
+__GFP_NOFAIL은  성공할  때까지  실패한  할당을  다시  시도합니다.
+􀀁  __GFP_ZERO는  할당이  성공하면  0바이트로  채워진  페이지를  반환합니다.  􀀁  __GFP_HARDWALL
+은  NUMA  시스템에서만  의미가  있습니다.  프로세스에  할당된  CPU와  연결된  노드로  메모리  할당을  제한합니다.  프로세스가  모든  CPU에
+서  실행되도록  허용된  경우(기본값)  플래그는  의미가  없습니다.  프로세스가  실행될  수  있는  CPU가  제한된  경우에만  명시적인  효과가  있습니다.
+􀀁  __GFP_THISNODE는  NUMA  시스템에서만  의미가  있습니다.  비트가  설정된  경우  다른  노드로의  폴백은  허용되지  않으며  메모리는  현재
+노드  또는  명시적으로  지정된  노드에  할당되는  것이  보장됩니다
+
+__GFP_RECLAIMABLE  및  __GFP_MOVABLE  은  페이지  이동  메커니즘에  필요합니다.
+이름에서  알  수  있듯이  할당된  메모리가  각각  회수  가능하거나  이동  가능함을  표시합니다.
+이는  페이지를  가져올  freelist의  하위  목록에  영향을  줍니다.
+
+플래그는  조합되어  사용되며  단독으로는  거의  사용되지  않으므로  커널은  이를  다양한  표준  상황에  적합한  플래그를  포함하는  그룹으로  분류합니다.
+가능하다면  메모리  관리  자체  이외의  메모리  할당에는  항상  다음  그룹  중  하나를  사용해야  합니다.
+(이  요구  사항은  미리  정의된  그룹의  이름이  내부  데이터  및  커널  소스의  정의에  대한  일반적인  규칙인  이중  밑줄로  시작하지
+않는다는  사실로  강화됩니다.)
+<gfp.h>
+#define GFP_ATOMIC (__GFP_HIGH)
+#define GFP_NOIO (__GFP_WAIT)
+#define GFP_NOFS (__GFP_WAIT | __GFP_IO)
+#define GFP_KERNEL (__GFP_WAIT | __GFP_IO | __GFP_FS)
+#define GFP_USER (__GFP_WAIT | __GFP_IO | __GFP_FS | __GFP_HARDWALL)
+#define GFP_HIGHUSER (__GFP_WAIT | __GFP_IO | __GFP_FS | __GFP_HARDWALL | \
+__GFP_HIGHMEM)
+#define GFP_HIGHUSER_MOVABLE (__GFP_WAIT | __GFP_IO | __GFP_FS | \
+__GFP_HARDWALL | __GFP_HIGHMEM | \
+__GFP_MOVABLE)
+#define GFP_DMA __GFP_DMA
+#define GFP_DMA32 __GFP_DMA32
+
+처음  세  조합의  의미는  명확합니다.  GFP_ATOMIC은  어떤  계정에서도  중단되지  않고  메모리의  '비상  예비'를  활용할  수도
+있는  원자  할당에  사용됩니다.  GFP_NOIO  및  GFP_NOFS는  각각  I/O  작업과  VFS  계층에  대한  액세스를  명시적으로  제외하지만
+__GFP_WAIT가  설정되어  있기  때문에  중단될  수  있습니다.
+
+GFP_KERNEL  및  GFP_USER  는  각각  커널  및  사용자  할당에  대한  기본  설정입니다.
+이들의  실패는  시스템  안정성에  즉각적인  위협이  되지  않습니다.  GFP_KERNEL은  커널  소스에서  가장  자주  사용되는  플래그입니다.
+
+GFP_HIGHUSER  는  사용자  공간을  대신하여  사용되는  GFP_USER  의  확장입니다 .  또한  더  이상  직접  매핑할  수  없는  대
+용량  메모리  영역의  사용도  허용합니다.  사용자  프로세스의  주소  공간은  항상  비선형  페이지  테이블  할당을  통해  구성되므로  highmem  페이지를  사용하는  데에는  단점이  없습니다.
+GFP_HIGHUSER_MOVABLE  은  목적상  GFP_HIGHUSER  와  유사  하지만  가상  영역  ZONE_MOVABLE에서  할당이  충족됩니다 .
+
+
+GFP_DMA  는  DMA  할당에  사용되며  현재  __GFP_DMA  의  간단한  동의어입니다 .
+GFP_DMA32  는  마찬가지로  __GFP_GMA32의  동의어입니다
+
+AllocationMacros
+-------------------------
+플래그,  영역  수정자  및  다양한  할당  기능을  사용하여  커널은  매우  유연한  메모리  예약  시스템을  제공합니다.
+그럼에도  불구하고  모든  인터페이스  함수는  단일  기본  함수  (alloc_pages_node)로  역추적될  수  있습니다.
+단일  페이지를  예약하는  alloc_page  및  __get_free_page  는  alloc_pages와  마찬가지로  매크로의  도움으로  정의됩니다.
+
+<gfp.h>
+#define alloc_page(gfp_mask) alloc_pages(gfp_mask, 0)
+...
+#define __get_free_page(gfp_mask) \
+__get_free_pages((gfp_mask),0)
+<mm.h>
+#define __get_dma_pages(gfp_mask, order) \
+__get_free_pages((gfp_mask) | GFP_DMA,(order))
+
+get_zeroed_page  구현도  특별히  어렵지  않습니다.  __GFP_ZERO  플래그  와  함께  사용되는
+alloc_pages는  이미  null  바이트로  채워진  페이지를  예약합니다.
+—  페이지와  관련된  메모리  영역의  주소만  반환하면  됩니다.
+
+모든  아키텍처에서  구현해야  하는  Clear_page  표준  함수는  alloc_pages  가  페이지를  null  바이트로  채우는  데  도움  이  됩니다.19
+__get_free_pages는  alloc_pages에  액세스하고 ,  alloc_pages  는  차례로  alloc_pages_node에  의존합니다.
+
+<gfp.h>
+#define alloc_pages(gfp_mask, order) \
+alloc_pages_node(numa_node_id(), gfp_mask, order)
+mm/page_alloc.c
+fastcall unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
+{
+struct page * page;
+page = alloc_pages(gfp_mask, order);
+if (!page)
+return 0;
+return (unsigned long) page_address(page);
+}
+
+이  경우  alloc_pages  에서  반환된  페이지  인스턴스가  도우미  함수  page_address를  사용하여  메모리  주소로  변환되어야  하기  때문에
+매크로  대신  적절한  함수가  사용됩니다 .  이  시점에서는  함수가  전달된  페이지  인스턴스와  연관된  페이지의  선형  메모리  주소를  생성한다는
+것을  아는  것만으로도  충분합니다.  이는  highmem  페이지에  문제가  있으므로  섹션  3.5.7에서  해당  기능에  대해  자세히  설명합니다.
+이로써  모든  API  함수가  공통  기본  함수인  alloc_pages  로  통합되었습니다.그림  3-30은  그래픽  개요를  통해  다양한  기능  간의  관계를  보여줍니다.
+
+
+.. image:: ./img/fig3_30.png
+
+
+page_cache_alloc  및  page_cache_alloc_cold는  __GFP_COLD  수정자를  적절하게  설정하여  각각  캐시  웜  페이지와  캐시  콜드
+ 페이지를  생성하는  편의  함수입니다 .
+마찬가지로,  메모리  비우기  함수는  다른  매개변수로  호출되는  중앙  함수  (__free_pages)  로  축소될  수  있습니다.
+
+<gfp.h>
+#define __free_page(page) __free_pages((page), 0)
+#define free_page(addr) free_pages((addr),0)
+
+free_pages  와  __free_pages  사이의  관계는  가상  주소가
+먼저  구조체  페이지  에  대한  포인터로  변환되어야  하기  때문에  매크로  대신  함수를  통해  설정됩니다 .
+
+mm/page_alloc.c
+void free_pages(unsigned long addr, unsigned int order)
+{
+if (addr != 0) {
+__free_pages(virt_to_page(addr), order);
+}
+}
+
+virt_to_page는  가상  메모리  주소를  페이지  인스턴스에  대한  포인터로  변환합니다.
+기본적으로  이는  위에서  소개한  page_address  도우미  함수  의  반대입니다 .
+그림  3-31에서는  다양한  메모리  해제  기능  간의  관계를  그래픽  개요로  요약합니다.
+
+
+.. image:: ./img/fig3_31.png
+
+
+3.5.5 Reserving Page
+========================
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 Freeing Pages
