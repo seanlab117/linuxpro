@@ -3452,15 +3452,271 @@ virt_to_page는  가상  메모리  주소를  페이지  인스턴스에  대�
 
 3.5.5 Reserving Page
 ========================
+모든  API  함수는  버디  시스템의  중앙  구현을  위한  일종의  '실행  패드'인  alloc_pages_node  로  다시  연결됩니다.
+
+<gfp.h>
+static inline struct page *alloc_pages_node(int nid, gfp_t gfp_mask,
+unsigned int order)
+{
+if (unlikely(order >= MAX_ORDER))
+return NULL;
+/* Unknown node is current node */
+if (nid < 0)
+nid = numa_node_id();
+return __alloc_pages(gfp_mask, order,
+NODE_DATA(nid)->node_zonelists + gfp_zone(gfp_mask));
+}
+
+지나치게  큰  메모리  청크가  할당되지  않았는지  확인하기  위해  간단한  검사만  수행됩니다.
+존재하지  않는  음의  노드  ID가  지정되면  커널은  자동으로  다음에  속하는  ID를  사용합니다.
+현재  실행  중인  CPU.  그런  다음  적절한  매개변수  세트가  전달되는  __alloc_pages  에  작업이  위임됩니다 .
+gfp_zone은  할당  이  이행될  것으로  예상되는  영역을  선택하는  데  사용됩니다.  놓치기  쉬운  중요한  디테일이에요!
+커널  소스에서는  이  __alloc_pages를  '친구  시스템의  핵심''이라고  부릅니다.  왜냐하면  할당의  필수  측면을  다루기  때문입니다.
+하트는  중요한  요소이기  때문에  아래에서  그  기능을  자세히  소개하겠습니다.
 
 
+Selecting Pages
+------------------------
 
+그러므로  페이지  선택이  어떻게  작동하는지  살펴보겠습니다.
+Helper Functions
+먼저,  다양한  워터마크에  도달했을  때  동작을  제어하기  위해  함수에서  사용하는  일부  플래그를  정의해야  합니다.
 
+mm/page_alloc.c
+#define ALLOC_NO_WATERMARKS 0x01 /* don’t check watermarks at all */
+#define ALLOC_WMARK_MIN 0x02 /* use pages_min watermark */
+#define ALLOC_WMARK_LOW 0x04 /* use pages_low watermark */
+#define ALLOC_WMARK_HIGH 0x08 /* use pages_high watermark */
+#define ALLOC_HARDER 0x10 /* try to alloc harder */
+#define ALLOC_HIGH 0x20 /* __GFP_HIGH set */
+#define ALLOC_CPUSET 0x40 /* check for correct cpuset */
 
+첫  번째  플래그는  페이지를  가져올  수  있는지  여부를  결정할  때  적용되는  워터마크를  나타냅니다.
+기본적으로(즉,  다른  요소로  인한  압력으로  인해  더  많은  메모리가  절대적으로  필요  하지  않음 )  페이지는  영역에  최소한  zone->pages_high  페이지가  포함된  경우에만  가져옵니다.
+이는  ALLOC_WMARK_HIGH  플래그에  해당합니다.  대신  낮은  (zone->pages_low)  또는  최소  (zone->pages_min)
+설정을  사용하려면  ALLOC_WMARK_MIN  또는  _LOW를  적절하게  설정해야  합니다.  ALLOC_HARDER는  메모리가  긴급하게  필요할  때  할당  규칙을
+더  관대하게  적용하도록  버디  시스템에  지시합니다.  ALLOC_HIGH는  highmem이  할당될  때  이러한  규칙을  더욱  완화합니다.
+마지막으로  ALLOC_CPUSET은  현재  프로세스가  사용할  수  있는  CPU와  관련된  영역에서만  메모리를  가져와야  한다는  점을  커널에  지시합니다.
+물론  이  옵션은  NUMA  시스템에서만  의미가  있습니다.
+플래그  설정은  zone_watermark_ok  함수에  적용됩니다.
+이  함수는  설정된  할당  플래그에  따라  해당  영역에서  메모리를  계속  가져올  수  있는지  여부를  확인합니다.
 
+mm/page_alloc.c
+int zone_watermark_ok(struct zone *z, int order, unsigned long mark,
+int classzone_idx, int alloc_flags)
+{
+/* free_pages my go negative - that’s OK */
+long min = mark
+long free_pages = zone_page_state(z, NR_FREE_PAGES) - (1 << order) + 1;
+int o;
+if (alloc_flags & ALLOC_HIGH)
+min -= min / 2;
+if (alloc_flags & ALLOC_HARDER)
+min -= min / 4;
+if (free_pages <= min + z->lowmem_reserve[classzone_idx])
+return 0;
+for (o = 0; o < order; o++) {
+/* At the next order, this order’s pages become unavailable */
+free_pages -= z->free_area[o].nr_free << o;
+/* Require fewer higher order pages to be free */
+min >>= 1;
+if (free_pages <= min)
+return 0;
+}
+return 1;
+}
 
+zone_per_state를  통해  영역별  통계에  액세스할  수  있다는  점을  기억하세요 .
+이  경우  사용  가능한  페이지  수를  얻습니다.
+ALLOC_HIGH  및  ALLOC_HARDER  플래그가  해석되면(최소  표시  를  현재  값의  절반  또는  4분의  1로  줄임으로써  할당을  효과적으로
+시도하게  하거나  훨씬  더  어렵게  만듭니다),  함수는  사용  가능한  페이지  수가  원하는  최소값과  lowmem_reserve에  지정된  비상
+예비비를  더한  값입니다 .  그렇지  않은  경우  코드는  현재  순서보다  적은  모든  순서를  반복하고  free_pages  에서
+현재  영역의  모든  페이지를  뺍니다  ( nr_free가  여유  페이지  블록을  저장하기  때문에  o-fold  왼쪽  이동이  필요합니다 ).
+동시에  각  영역마다  필요한  여유  페이지  수가  절반으로  줄어듭니다.  모든  메모리  부족  영역을  반복한  후  커널이  페이지가
+충분하지  않다는  것을  확인하면  할당이  해제됩니다.
+get_page_from_freelist는  버디  시스템에서  사용하는  또  다른  중요한  도우미  함수입니다.  할당  가능  여부를  결정하는  플래그
+설정  및  할당  순서를  참조합니다.  그렇다면  실제  페이지  할당을  시작합니다.20
 
+mm/page_alloc.c
+static struct page *
+get_page_from_freelist(gfp_t gfp_mask, unsigned int order,
+struct zonelist *zonelist, int alloc_flags)
+{
+struct zone **z;
+struct page *page = NULL;
+int classzone_idx = zone_idx(zonelist->zones[0]);
+struct zone *zone;
+...
+/*
+* Scan zonelist, looking for a zone with enough free.
+* See also cpuset_zone_allowed() comment in kernel/cpuset.c.
+*/
+z = zonelist->zones;
+do {
+...
+zone = *z;
 
+if ((alloc_flags & ALLOC_CPUSET) &&
+!cpuset_zone_allowed_softwall(zone, gfp_mask))
+continue;
+if (!(alloc_flags & ALLOC_NO_WATERMARKS)) {
+unsigned long mark;
+if (alloc_flags & ALLOC_WMARK_MIN)
+mark = zone->pages_min;
+else if (alloc_flags & ALLOC_WMARK_LOW)
+mark = zone->pages_low;
+else
+mark = zone->pages_high;
+if (!zone_watermark_ok(zone, order, mark,
+classzone_idx, alloc_flags))
+continue;
+}
+...
+
+대체  목록에  대한  포인터가  함수에  매개변수로  전달됩니다.  이  목록은  원하는  영역에  사용  가능한  페이지가  없는  경우  시스템의
+다른  영역(및  노드)을  검색하는  순서를  결정합니다.  이  데이터  구조의  레이아웃과  의미는  섹션  3.4.1에서  광범위하게  논의됩니다.
+후속  do  루프는  적절한  여유  메모리  블록을  찾는  가장  간단한  방법으로  직관적으로  예상되는  작업을  거의  정확하게  수행합니다.
+즉,  대체  목록의  모든  영역을  반복합니다.  우선,  ALLOC_*  플래그가  해석됩니다  (cpuset_zone_allowed_softwall  은  주어진
+영역이  프로세스에  대해  허용된  CPU에  속하는지  여부를  확인하는  또  다른  도우미  함수입니다).
+그런  다음  zone_watermark_ok는  각  영역을  검사하여  충분한  페이지가  있는지  확인하고  연속  메모리  블록을  할당하려고  시도합니다.
+이러한  두  조건  중  하나가  충족되지  않으면(사용  가능한  페이지가  충분하지  않거나  요청이  연속  페이지로  충족될  수  없음)  대체  목록의
+다음  영역이  동일한  방식으로  확인됩니다.
+영역이  현재  요청에  적합한  경우  buffered_rmqueue는  원하는  페이지  수를  제거하려고  시도합니다.
+mm/page_alloc.c
+...
+page = buffered_rmqueue(*z, order, gfp_mask);
+if (page) {
+zone_statistics(zonelist, *z);
+break;
+}
+} while (*(++z) != NULL);
+return page;
+}
+
+섹션  3.5.4에서  buffered_rmqueue를  자세히  살펴보겠습니다 .
+페이지  제거에  성공하면  페이지가  호출자에게  반환될  수  있습니다.
+그렇지  않으면  루프가  새로  시작되고  다음으로  가장  좋은  영역이  선택됩니다.
+
+Allocation Control
+위에서  언급했듯이  __alloc_pages는  버디  시스템의  주요  기능입니다.  이제  모든  준비  작업을  처리하고  가능한  모든  플래그를  설명했으므로
+커널에서  가장  긴  부분  중  하나인  함수의  상대적으로  복잡한  구현에  관심을  돌립니다.  위에서  복잡성이  발생합니다.
+
+요청을  충족시키기에  사용할  수  있는  메모리가  너무  적거나  사용  가능한  메모리가  천천히  고갈되는  경우  모두  발생합니다.
+충분한  메모리를  사용할  수  있으면  코드  시작  부분에  표시된  대로  필요한  작업이  빠르게  완료됩니다.
+
+mm/page_alloc.c
+struct page * fastcall
+__alloc_pages(gfp_t gfp_mask, unsigned int order,
+struct zonelist *zonelist)
+{
+const gfp_t wait = gfp_mask & __GFP_WAIT;
+struct zone **z;
+struct page *page;
+struct reclaim_state reclaim_state;
+struct task_struct *p = current;
+int do_retry;
+int alloc_flags;
+int did_some_progress;
+might_sleep_if(wait);
+restart:
+z = zonelist->zones; /* the list of zones suitable for gfp_mask */
+if (unlikely(*z == NULL)) {
+/*
+* Happens if we have an empty zonelist as a result of
+* GFP_THISNODE being used on a memoryless node
+*/
+return NULL;
+}
+page = get_page_from_freelist(gfp_mask|__GFP_HARDWALL, order,
+zonelist, ALLOC_WMARK_LOW|ALLOC_CPUSET);
+if (page)
+goto got_pg;
+...
+
+가장  간단한  시나리오에서  새로운  메모리  영역  할당에는  필요한  페이지  수를  반환하기  위해
+
+get_page_from_freelist  를  한  번  호출하는  작업이  포함됩니다  (이는  got_pg  레이블의  코드로  처리됨 ).
+
+첫  번째  메모리  할당  시도는  특별히  공격적이지  않습니다.
+어떤  영역에서든  메모리를  찾지  못한다면  메모리가  많이  남지  않았지만  더  많은  메모리를  찾기  위해  커널의  노력이  어느  정도
+증가해야  한다는  의미입니다(큰  총은  나중에  나옵니다).
+
+mm/page_alloc.c
+...
+for (z = zonelist->zones; *z; z++)
+wakeup_kswapd(*z, order);
+alloc_flags = ALLOC_WMARK_MIN;
+if ((unlikely(rt_task(p)) && !in_interrupt()) || !wait)
+alloc_flags |= ALLOC_HARDER;
+if (gfp_mask & __GFP_HIGH)
+
+alloc_flags |= ALLOC_HIGH;
+if (wait)
+alloc_flags |= ALLOC_CPUSET;
+page = get_page_from_freelist(gfp_mask, order, zonelist, alloc_flags);
+if (page)
+goto got_pg;
+...
+}
+
+커널은  대체  목록의  모든  영역을  다시  반복하고  매번  wakeup_kswapd를  호출합니다.
+이름에서  알  수  있듯이  이  함수는  페이지  교체를  담당하는  kswapd  데몬을  깨웁니다.
+스와핑  데몬의  작업은  복잡하므로  별도의  장(18장)에서  설명합니다.
+여기서  주의해야  할  점은  예를  들어  커널  캐시  축소  및  페이지  회수,  즉  거의  사용되지  않는  페이지를
+다시  쓰거나  교체하여  새로운  메모리를  얻을  수  있다는  것입니다.  두  조치  모두  데몬에  의해  시작됩니다.
+스와핑  데몬이  깨어나면  커널은  영역  중  하나에서  적합한  메모리  청크를  찾기  위한  새로운  시도를  시작합니다.
+이번에는  특정  상황에  대해  더  유망한  값으로  할당  플래그를  조정하여  더  적극적으로  검색을  수행합니다.
+이를  통해  워터마크를  최소값으로  줄입니다.  ALLOC_HARDER는  실시간  프로세스와  절전  모드로  전환되지  않을  수  있는
+__GFP_WAIT  호출에  대해  설정됩니다.  변경된  플래그  세트를  사용하여  get_page_from_freelist를  추가로  호출하면  원하는  페이지를
+얻으려고  시도합니다.
+이  방법도  실패하면  커널은  보다  과감한  조치를  취합니다.
+mm/page_alloc.c
+rebalance:
+if (((p->flags & PF_MEMALLOC) || unlikely(test_thread_flag(TIF_MEMDIE)))
+&& !in_interrupt()) {
+if (!(gfp_mask & __GFP_NOMEMALLOC)) {
+nofail_alloc:
+/* go through the zonelist yet again, ignoring mins */
+page = get_page_from_freelist(gfp_mask, order,
+zonelist, ALLOC_NO_WATERMARKS);
+if (page)
+goto got_pg;
+if (gfp_mask & __GFP_NOFAIL) {
+congestion_wait(WRITE, HZ/50);
+goto nofail_alloc;
+}
+}
+goto nopage;
+}
+...
+PF_MEMALLOC이  설정  되거나  TIF_MEMDIE  플래그가  작업에  대해  설정된  경우
+(두  경우  모두  커널이  인터럽트  컨텍스트에  있어서는  안  됩니다).
+get_page_from_freelist는  원하는  페이지를  얻기  위해  한  번  더  시도하지만  이번에는  ALLOC_NO_WATERMARKS  가  설정되었기  때문에
+워터마크가  완전히  무시됩니다.  PF_MEMALLOC  조건은  일반적으로  할당자  자체에서  더  많은  메모리에  대한  호출이  발생한  경우에만  적용되는  반면 ,
+TIF_MEMDIE는  스레드가  OOM  킬러에  의해  방금  적중되었을  때  설정됩니다.
+
+다음  두  가지  이유로  검색이  여기서  끝날  수  있습니다.
+
+1.  __GFP_NOMEMALLOC  이  설정되었습니다.  이  플래그는  비상  예비  사용을  금지하므로(워터마크가  무시되는  경우  가능)  워터마크
+를  준수하지  않고  get_page_from_freelist를  호출하는  것은  금지됩니다.
+이  경우  커널은  noopage  레이블로  점프하여  궁극적으로  실패하는  것  외에는  아무것도  할  수  없습니다.
+여기서  실패는  커널  메시지와  함께  사용자에게  보고되고  NULL  포인터가  호출자에게  반환됩니다.
+2.  워터마크가  무시되었음에도  불구하고  get_page_from_freelist  가  실패합니다.
+이  경우  검색도  중단되고  오류  메시지와  함께  종료됩니다.  그러나  __GFP_NOFAIL
+이  설정된  경우  커널은  무한  루프( nofail_alloc  레이블  로  다시  분기하여  구현됨)에  들어가  먼저  블록  계층에서
+'혼잡'이  끝날  때까지  ( congestion_wait를  통해)  기다립니다.  페이지가  회수될  때(18장  참조)
+그런  다음  성공할  때까지  할당이  다시  시도됩니다.
+
+PF_MEMALLOC이  설정되지  않은  경우  커널에는  아직  시도할  수  있는  옵션이  더  있지만  이를  위해서는  절전  모드가  필요합니다.
+이는  kswapd가  어느  정도  진전을  이루도록  하기  위해  필요합니다 .
+이제  커널은  시간이  많이  걸리는  작업이  시작되는  느린  경로  로  들어갑니다 .
+전제  조건  은  후속  작업으로  인해  프로세스가  절전  모드로  전환될  수  있으므로  할당  마스크에  __GFP_WAIT  플래그가  설정되어  있다는  것입니다 .
+mm/page_alloc.c
+/* Atomic allocations - we can’t balance anything */
+if (!wait)
+goto nopage;
+cond_schedule();
+...
 
 
 
